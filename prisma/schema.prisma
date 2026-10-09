@@ -1,0 +1,370 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Get a free hosted Postgres database in seconds: `npx create-db`
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum EquipmentStatus {
+  RECEBIDO
+  EM_ANALISE
+  REPARO
+  FINALIZADO
+  OS_CANCELADA
+}
+
+enum ServiceOrderType {
+  INSTALACAO
+  PREVENTIVA
+  CORRETIVA
+}
+
+enum Role {
+  ADMIN
+  TECHNICIAN
+}
+
+enum ServiceOrderStatus {
+  ABERTA
+  FINALIZADA
+  CANCELADA
+}
+
+enum ImageTag {
+  ANTES
+  DURANTE
+  DEPOIS
+}
+
+enum MovementType {
+  IN
+  OUT
+}
+
+// ==========================================
+// 🏢 O CORAÇÃO DO SAAS: TENANT (Empresa)
+// ==========================================
+model Tenant {
+  id         String   @id @default(uuid())
+  name       String
+  cnpj       String?  @unique
+  active     Boolean  @default(true)
+  created_at DateTime @default(now())
+
+  // Relacionamentos: O Tenant é dono de todas estas entidades
+  users               User[]
+  customers           Customer[]
+  equipment_models    EquipmentModel[]
+  equipments          Equipment[]
+  service_orders      ServiceOrder[]
+  parts               Part[]
+  suppliers           Supplier[]
+  checklist_templates ChecklistTemplate[]
+
+  @@map("tenants")
+}
+
+model User {
+  id                     String    @id @default(uuid())
+  name                   String
+  email                  String    @unique
+  password               String
+  phone                  String?
+  avatar_url             String?
+  signature_url          String?   @db.Text
+  active                 Boolean   @default(true)
+  role                   Role      @default(TECHNICIAN)
+  reset_password_token   String?
+  reset_password_expires DateTime?
+  created_at             DateTime  @default(now())
+
+  // 🟢 LIGAÇÃO MULTI-TENANT
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  opened_service_orders ServiceOrder[]      @relation("OpenedBy")
+  closed_service_orders ServiceOrder[]      @relation("ClosedBy")
+  stockMovements        StockMovement[]
+  serviceOrderEvents    ServiceOrderEvent[]
+
+  @@map("users")
+}
+
+model Customer {
+  id           String   @id @default(uuid())
+  name         String
+  email        String?
+  phone        String?
+  zipcode      String?
+  city         String
+  state        String
+  address      String?
+  number       String?
+  complement   String?
+  neighborhood String?
+  active       Boolean  @default(true)
+  created_at   DateTime @default(now())
+
+  // 🟢 LIGAÇÃO MULTI-TENANT
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  equipments    Equipment[]
+  serviceOrders ServiceOrder[]
+
+  @@map("customers")
+}
+
+model EquipmentModel {
+  id         String   @id @default(uuid())
+  name       String
+  active     Boolean  @default(true)
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  // 🟢 LIGAÇÃO MULTI-TENANT
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  equipments Equipment[]
+  checklists ChecklistTemplate[]
+
+  // Garante que o mesmo Tenant não cadastre dois modelos com o mesmo nome
+  @@unique([name, tenantId])
+  @@map("equipment_models")
+}
+
+model Equipment {
+  id            String          @id @default(uuid())
+  serial_number String
+  modelId       String
+  customerId    String?
+  received_at   DateTime        @default(now())
+  returned_at   DateTime?
+  active        Boolean         @default(true)
+  status        EquipmentStatus @default(RECEBIDO)
+
+  // 🟢 LIGAÇÃO MULTI-TENANT
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  service_orders ServiceOrder[]
+  customer       Customer?      @relation(fields: [customerId], references: [id])
+  model          EquipmentModel @relation(fields: [modelId], references: [id])
+
+  // Garante que o mesmo Tenant não tenha equipamentos com serial duplicado
+  @@unique([serial_number, tenantId])
+  @@map("equipments")
+}
+
+model ServiceOrder {
+  id                   String             @id @default(uuid())
+  number               Int                @default(autoincrement())
+  customerId           String
+  equipmentId          String
+  type                 ServiceOrderType   @default(CORRETIVA)
+  openedById           String
+  closedById           String?
+  opened_at            DateTime           @default(now())
+  closed_at            DateTime?
+  updated_at           DateTime           @default(now()) @updatedAt()
+  problem_description  String
+  solution_description String?
+  technical_notes      String?            @db.Text
+  client_signature     String?            @db.Text
+  signer_name          String?
+  status               ServiceOrderStatus @default(ABERTA)
+  cancellation_reason  String?
+
+  labor_cost         Decimal @default(0) @db.Decimal(10, 2)
+  travel_cost        Decimal @default(0) @db.Decimal(10, 2)
+  accommodation_cost Decimal @default(0) @db.Decimal(10, 2)
+
+  // 🟢 LIGAÇÃO MULTI-TENANT
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  checklist          ServiceOrderChecklist?
+  parts_replaced     PartReplaced[]
+  openedBy           User                   @relation("OpenedBy", fields: [openedById], references: [id])
+  closedBy           User?                  @relation("ClosedBy", fields: [closedById], references: [id])
+  equipment          Equipment?             @relation(fields: [equipmentId], references: [id])
+  customer           Customer               @relation(fields: [customerId], references: [id])
+  stockMovements     StockMovement[]
+  serviceOrderEvents ServiceOrderEvent[]
+  images             ServiceOrderImage[]
+
+  // Garante que cada empresa tenha sua numeração sequencial única
+  @@unique([number, tenantId])
+  @@map("service_orders")
+}
+
+model PartReplaced {
+  id             String  @id @default(uuid())
+  serviceOrderId String
+  partId         String
+  quantity       Int     @default(1)
+  unit_price     Decimal @db.Decimal(10, 2)
+
+  service_order ServiceOrder @relation(fields: [serviceOrderId], references: [id], onDelete: Cascade)
+  part          Part         @relation(fields: [partId], references: [id])
+
+  @@map("parts_replaced")
+}
+
+model ChecklistTemplate {
+  id         String   @id @default(uuid())
+  name       String
+  active     Boolean  @default(true)
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  // 🟢 LIGAÇÃO MULTI-TENANT
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  modelId String
+  model   EquipmentModel @relation(fields: [modelId], references: [id])
+
+  questions ChecklistQuestion[]
+
+  @@map("checklist_templates")
+}
+
+model ChecklistQuestion {
+  id         String   @id @default(uuid())
+  text       String
+  order      Int
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  templateId String
+  template   ChecklistTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+
+  @@map("checklist_questions")
+}
+
+model ServiceOrderChecklist {
+  id           String    @id @default(uuid())
+  notes        String?
+  started_at   DateTime  @default(now())
+  completed_at DateTime?
+
+  serviceOrderId String       @unique
+  serviceOrder   ServiceOrder @relation(fields: [serviceOrderId], references: [id], onDelete: Cascade)
+
+  answers ChecklistAnswer[]
+
+  @@map("service_order_checklists")
+}
+
+model ChecklistAnswer {
+  id String @id @default(uuid())
+
+  question_text String
+  order         Int
+  is_ok         Boolean
+  comment       String?
+
+  checklistId String
+  checklist   ServiceOrderChecklist @relation(fields: [checklistId], references: [id], onDelete: Cascade)
+
+  @@map("checklist_answers")
+}
+
+model Supplier {
+  id         String   @id @default(uuid())
+  name       String
+  document   String?
+  email      String?
+  phone      String?
+  active     Boolean  @default(true)
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  // 🟢 LIGAÇÃO MULTI-TENANT
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  parts Part[]
+
+  @@map("suppliers")
+}
+
+model Part {
+  id            String  @id @default(uuid())
+  name          String
+  sku           String?
+  cost_price    Decimal @db.Decimal(10, 2)
+  sale_price    Decimal @db.Decimal(10, 2)
+  current_stock Int     @default(0)
+  min_stock     Int     @default(0)
+
+  // 🟢 LIGAÇÃO MULTI-TENANT
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  supplierId String?
+  supplier   Supplier? @relation(fields: [supplierId], references: [id])
+
+  active     Boolean  @default(true)
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  movements   StockMovement[]
+  replaced_in PartReplaced[]
+
+  @@map("parts")
+}
+
+model StockMovement {
+  id       String       @id @default(uuid())
+  partId   String
+  type     MovementType
+  quantity Int
+  reason   String
+
+  userId         String?
+  serviceOrderId String?
+
+  created_at DateTime @default(now())
+
+  part         Part          @relation(fields: [partId], references: [id], onDelete: Cascade)
+  user         User?         @relation(fields: [userId], references: [id])
+  serviceOrder ServiceOrder? @relation(fields: [serviceOrderId], references: [id])
+
+  @@map("stock_movements")
+}
+
+model ServiceOrderEvent {
+  id             String   @id @default(uuid())
+  serviceOrderId String
+  userId         String
+  action         String
+  notes          String?
+  created_at     DateTime @default(now())
+
+  serviceOrder ServiceOrder @relation(fields: [serviceOrderId], references: [id], onDelete: Cascade)
+  user         User         @relation(fields: [userId], references: [id])
+
+  @@map("service_order_events")
+}
+
+model ServiceOrderImage {
+  id         String   @id @default(uuid())
+  url        String
+  tag        ImageTag
+  created_at DateTime @default(now())
+
+  serviceOrder   ServiceOrder @relation(fields: [serviceOrderId], references: [id], onDelete: Cascade)
+  serviceOrderId String
+
+  @@map("service_order_images")
+}

@@ -1,0 +1,32 @@
+services:
+    db:
+        image: postgres:15
+        container_name: rpg-saas-postgres
+        restart: always
+        ports:
+            - "5432:5432"
+        environment:
+            POSTGRES_USER: admin
+            POSTGRES_PASSWORD: adminroot
+            POSTGRES_DB: rpg_saas_db
+        volumes:
+            - rpg_saas_data:/var/lib/postgresql/data
+
+    api:
+        build: .
+        image: rpg-saas-backend-img
+        container_name: rpg-saas-api
+        restart: always
+        ports:
+            - "3333:3333"
+        depends_on:
+            - db
+        volumes:
+            - .:/app
+            # Evita que o node_modules do container seja sobrescrito pelo da sua máquina
+            - /app/node_modules
+        env_file:
+            - .env
+
+volumes:
+    rpg_saas_data:
