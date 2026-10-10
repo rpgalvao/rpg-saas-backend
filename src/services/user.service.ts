@@ -6,7 +6,10 @@ import { hashPassword, verifyPassword } from "../utils/hash";
 import { setFullURL } from "../utils/setFullUrl";
 import { UpdateUserInput } from "../validators/user.validator";
 
-export const createUser = async (data: Prisma.UserCreateInput) => {
+export const createUser = async (
+    data: Omit<Prisma.UserUncheckedCreateInput, 'tenantId'>,
+    tenantId: string
+) => {
     const emailExists = await prisma.user.findUnique({ where: { email: data.email } });
     if (emailExists) throw new AppError('E-mail informado já existe no sistema', 400);
 
@@ -18,7 +21,8 @@ export const createUser = async (data: Prisma.UserCreateInput) => {
             email: data.email,
             password: hashedPassword,
             phone: data.phone,
-            role: data.role // Inserindo o nível de acesso no banco
+            role: data.role,
+            tenantId
         },
         select: {
             id: true,
@@ -33,9 +37,12 @@ export const createUser = async (data: Prisma.UserCreateInput) => {
     return newUser;
 };
 
-export const getUsersList = async (includeInactive: boolean = false) => {
+export const getUsersList = async (tenantId: string, includeInactive: boolean = false) => {
     const usersList = await prisma.user.findMany({
-        where: includeInactive ? undefined : { active: true },
+        where: {
+            tenantId,
+            ...(includeInactive ? {} : { active: true })
+        },
         orderBy: { name: 'asc' },
         select: {
             id: true,
@@ -49,16 +56,25 @@ export const getUsersList = async (includeInactive: boolean = false) => {
     return usersList;
 };
 
-export const toggleUserStatus = async (id: string) => {
-    const user = await prisma.user.findUnique({ where: { id } });
+export const toggleUserStatus = async (id: string, tenantId: string) => {
+    const user = await prisma.user.findFirst({
+        where: { id, tenantId }
+    });
     if (!user) throw new AppError('Usuário não encontrado', 404);
 
-    const updatedUser = await prisma.user.update({
-        where: { id },
-        data: { active: !user.active }
-    });
+    try {
+        const updatedUser = await prisma.user.update({
+            where: { id, tenantId },
+            data: { active: !user.active }
+        });
 
-    return updatedUser.active ? 'Usuário reativado com sucesso' : 'Usuário desativado com sucesso';
+        return updatedUser.active ? 'Usuário reativado com sucesso' : 'Usuário desativado com sucesso';
+    } catch (error: any) {
+        if (error.code === 'P2025') {
+            throw new AppError('Usuário não encontrado', 404);
+        }
+        throw error;
+    }
 };
 
 export const getUserByEmail = async (email: string) => {
@@ -67,8 +83,10 @@ export const getUserByEmail = async (email: string) => {
     return user;
 };
 
-export const getUserById = async (id: string) => {
-    const user = await prisma.user.findUnique({ where: { id } });
+export const getUserById = async (id: string, tenantId: string) => {
+    const user = await prisma.user.findFirst({
+        where: { id, tenantId }
+    });
     if (!user) throw new AppError('Usuário não encontrado', 404);
     return {
         id: user.id,
@@ -82,8 +100,10 @@ export const getUserById = async (id: string) => {
     };
 };
 
-export const updateUser = async (id: string, data: UpdateUserInput) => {
-    const user = await prisma.user.findUnique({ where: { id } });
+export const updateUser = async (id: string, tenantId: string, data: UpdateUserInput) => {
+    const user = await prisma.user.findFirst({
+        where: { id, tenantId }
+    });
     if (!user) throw new AppError('Usuário não encontrado!', 404);
 
     // Tipamos temporariamente como 'any' (ou Record<string, any>) para manipularmos os campos virtuais
@@ -133,38 +153,56 @@ export const updateUser = async (id: string, data: UpdateUserInput) => {
     // Assim, o Prisma só recebe o que realmente é coluna no banco.
     delete updateData.currentPassword;
     delete updateData.newPassword;
+    delete updateData.tenantId; // Garantir que tenantId nunca seja alterado via update
 
-    const updatedUser = await prisma.user.update({
-        where: { id },
-        data: updateData,
-        select: {
-            id: true,
-            name: true,
-            email: true,
-            role: true,
-            avatar_url: true,
-            created_at: true,
-            phone: true,
-            signature_url: true // Pode descomentar isso depois que criar a coluna no Prisma
+    try {
+        const updatedUser = await prisma.user.update({
+            where: { id, tenantId },
+            data: updateData,
+            select: {
+                id: true,
+                name: true,
+                email: true,
+                role: true,
+                avatar_url: true,
+                created_at: true,
+                phone: true,
+                signature_url: true // Pode descomentar isso depois que criar a coluna no Prisma
+            }
+        });
+
+        if (!updatedUser) throw new AppError('Erro ao atualizar o usuário!', 500);
+
+        if (updatedUser.avatar_url) {
+            updatedUser.avatar_url = setFullURL(`/uploads/avatars/${updatedUser.avatar_url}`);
         }
-    });
 
-    if (!updatedUser) throw new AppError('Erro ao atualizar o usuário!', 500);
-
-    if (updatedUser.avatar_url) {
-        updatedUser.avatar_url = setFullURL(`/uploads/avatars/${updatedUser.avatar_url}`);
+        return updatedUser;
+    } catch (error: any) {
+        if (error.code === 'P2025') {
+            throw new AppError('Usuário não encontrado!', 404);
+        }
+        throw error;
     }
-
-    return updatedUser;
 };
 
-export const deactivateUser = async (id: string) => {
-    const user = await prisma.user.findUnique({ where: { id } });
-    if (!user) throw new AppError('Usuário não encontrado', 404);
-    await prisma.user.update({
-        where: { id },
-        data: { active: false }
+export const deactivateUser = async (id: string, tenantId: string) => {
+    const user = await prisma.user.findFirst({
+        where: { id, tenantId }
     });
+    if (!user) throw new AppError('Usuário não encontrado', 404);
 
-    return 'Usuário desativado com sucesso';
+    try {
+        await prisma.user.update({
+            where: { id, tenantId },
+            data: { active: false }
+        });
+
+        return 'Usuário desativado com sucesso';
+    } catch (error: any) {
+        if (error.code === 'P2025') {
+            throw new AppError('Usuário não encontrado', 404);
+        }
+        throw error;
+    }
 };

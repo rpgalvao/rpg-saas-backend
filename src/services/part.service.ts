@@ -11,11 +11,11 @@ type CreatePartData = {
     supplierId?: string | null;
 };
 
-export const createPart = async (data: CreatePartData) => {
-    // 🛡️ NOVA TRAVA: Verifica se o fornecedor existe antes de criar a peça
+export const createPart = async (data: CreatePartData, tenantId: string) => {
+    // 🛡️ Verifica se o fornecedor existe no MESMO tenant antes de criar a peça
     if (data.supplierId) {
-        const supplierExists = await prisma.supplier.findUnique({
-            where: { id: data.supplierId }
+        const supplierExists = await prisma.supplier.findFirst({
+            where: { id: data.supplierId, tenantId }
         });
 
         if (!supplierExists) {
@@ -23,35 +23,55 @@ export const createPart = async (data: CreatePartData) => {
         }
     }
 
-    return await prisma.part.create({ data });
+    return await prisma.part.create({
+        data: {
+            name: data.name,
+            sku: data.sku,
+            cost_price: data.cost_price,
+            sale_price: data.sale_price,
+            current_stock: data.current_stock ?? 0,
+            min_stock: data.min_stock ?? 0,
+            supplierId: data.supplierId,
+            tenantId
+        }
+    });
 };
 
-export const getAllParts = async (includeInactive = false) => {
+export const getAllParts = async (tenantId: string, includeInactive = false) => {
     return await prisma.part.findMany({
-        where: includeInactive ? undefined : { active: true },
+        where: {
+            tenantId,
+            ...(includeInactive ? {} : { active: true })
+        },
         include: { supplier: true },
         orderBy: { name: 'asc' }
     });
 };
 
-export const getPartById = async (id: string) => {
-    return await prisma.part.findUnique({
-        where: { id },
+export const getPartById = async (id: string, tenantId: string) => {
+    return await prisma.part.findFirst({
+        where: { id, tenantId },
         include: { supplier: true }
     });
 };
 
-export const updatePart = async (id: string, data: Partial<CreatePartData & { active: boolean; }>) => {
-    // Verifica se a peça existe
-    const partExists = await prisma.part.findUnique({ where: { id } });
+export const updatePart = async (
+    id: string,
+    tenantId: string,
+    data: Partial<CreatePartData & { active: boolean; }>
+) => {
+    // Verifica se a peça existe no mesmo tenant
+    const partExists = await prisma.part.findFirst({
+        where: { id, tenantId }
+    });
     if (!partExists) {
         throw new AppError("Peça não encontrada.", 404);
     }
 
-    // 🛡️ NOVA TRAVA: Verifica se o novo fornecedor (caso seja alterado) existe
+    // 🛡️ Verifica se o novo fornecedor (caso seja alterado) pertence ao mesmo tenant
     if (data.supplierId) {
-        const supplierExists = await prisma.supplier.findUnique({
-            where: { id: data.supplierId }
+        const supplierExists = await prisma.supplier.findFirst({
+            where: { id: data.supplierId, tenantId }
         });
 
         if (!supplierExists) {
@@ -59,32 +79,39 @@ export const updatePart = async (id: string, data: Partial<CreatePartData & { ac
         }
     }
 
+    const { tenantId: _, ...safeData } = data as any;
+
     return await prisma.part.update({
-        where: { id },
-        data
+        where: { id, tenantId },
+        data: safeData
     });
 };
 
-export const deletePart = async (id: string) => {
-    const partExists = await prisma.part.findUnique({ where: { id } });
+export const deletePart = async (id: string, tenantId: string) => {
+    const partExists = await prisma.part.findFirst({
+        where: { id, tenantId }
+    });
     if (!partExists) {
         throw new AppError("Peça não encontrada.", 404);
     }
 
     return await prisma.part.update({
-        where: { id },
+        where: { id, tenantId },
         data: { active: false }
     });
 };
 
-export const getLowStockParts = async () => {
-    // Busca as peças ativas
+export const getLowStockParts = async (tenantId: string) => {
+    // Busca as peças ativas do tenant
     const parts = await prisma.part.findMany({
-        where: { active: true },
-        include: { supplier: true }, // Traz o fornecedor para o cliente já saber de quem comprar!
+        where: {
+            tenantId,
+            active: true
+        },
+        include: { supplier: true },
         orderBy: { name: 'asc' }
     });
 
-    // A regra de negócio: Retorna apenas as que o estoque atual bateu no limite ou passou para baixo
+    // Retorna apenas as que o estoque atual bateu no limite ou passou para baixo
     return parts.filter((part: any) => part.current_stock <= part.min_stock);
 };

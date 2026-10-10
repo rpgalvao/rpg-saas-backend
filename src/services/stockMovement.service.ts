@@ -11,10 +11,27 @@ type CreateMovementData = {
     unit_cost?: number;
 };
 
-export const createMovement = async (data: CreateMovementData) => {
-    const part = await prisma.part.findUnique({ where: { id: data.partId } });
+export const createMovement = async (
+    data: CreateMovementData,
+    tenantId: string,
+    loggedUserId?: string
+) => {
+    // 🛡️ Valida se a peça pertence ao mesmo tenant
+    const part = await prisma.part.findFirst({
+        where: { id: data.partId, tenantId }
+    });
     if (!part) {
         throw new AppError("Peça não encontrada.", 404);
+    }
+
+    // Se informou serviceOrderId, valida se a OS pertence ao mesmo tenant
+    if (data.serviceOrderId) {
+        const os = await prisma.serviceOrder.findFirst({
+            where: { id: data.serviceOrderId, tenantId }
+        });
+        if (!os) {
+            throw new AppError("Ordem de Serviço não encontrada.", 404);
+        }
     }
 
     if (data.type === 'OUT' && part.current_stock < data.quantity) {
@@ -37,9 +54,14 @@ export const createMovement = async (data: CreateMovementData) => {
     }
 
     const [movement, updatedPart] = await prisma.$transaction([
-        prisma.stockMovement.create({ data: movementData }),
+        prisma.stockMovement.create({
+            data: {
+                ...movementData,
+                userId: movementData.userId || loggedUserId
+            }
+        }),
         prisma.part.update({
-            where: { id: data.partId },
+            where: { id: data.partId, tenantId },
             data: partUpdateData
         })
     ]);
@@ -47,9 +69,15 @@ export const createMovement = async (data: CreateMovementData) => {
     return { movement, updatedPart };
 };
 
-export const getAllMovements = async (partId?: string) => {
+export const getAllMovements = async (tenantId: string, partId?: string) => {
+    // 🛡️ Garante o isolamento através do relacionamento com Part (que tem tenantId)
     return await prisma.stockMovement.findMany({
-        where: partId ? { partId } : undefined,
+        where: {
+            part: {
+                tenantId
+            },
+            ...(partId ? { partId } : {})
+        },
         include: { part: true },
         orderBy: { created_at: 'desc' }
     });

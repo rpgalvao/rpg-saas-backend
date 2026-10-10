@@ -166,7 +166,7 @@ model Equipment {
 
 model ServiceOrder {
   id                   String             @id @default(uuid())
-  number               Int                @default(autoincrement())
+  number               Int
   customerId           String
   equipmentId          String
   type                 ServiceOrderType   @default(CORRETIVA)

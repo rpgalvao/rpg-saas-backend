@@ -10,33 +10,45 @@ import { PdfProvider } from '../providers/PdfProvider';
 import { MailProvider } from '../providers/MailProvider';
 import { setFullURL } from "../utils/setFullUrl";
 
-export const createServiceOrder = async (data: Omit<Prisma.ServiceOrderUncheckedCreateInput, 'openedById'>, loggedUserId: string) => {
-    // 1. Buscamos o equipamento (agora precisamos do modelId para o checklist)
-    const equipment = await prisma.equipment.findUnique({
-        where: { id: data.equipmentId },
-        select: { id: true, customerId: true, modelId: true } // Pegamos o modelId!
+export const createServiceOrder = async (
+    data: Omit<Prisma.ServiceOrderUncheckedCreateInput, 'openedById' | 'tenantId' | 'number'>, // Garantimos que o number não venha do payload
+    loggedUserId: string,
+    tenantId: string
+) => {
+    // 1. Buscamos o equipamento validando o tenantId
+    const equipment = await prisma.equipment.findFirst({
+        where: { id: data.equipmentId, tenantId },
+        select: { id: true, customerId: true, modelId: true }
     });
 
     if (!equipment) throw new AppError('Equipamento não consta na base de dados', 404);
     if (equipment.customerId !== data.customerId) throw new AppError('Esse equipamento não pertence a esse cliente', 403);
 
-    // 2. A Inteligência do Checklist
-    // Preparamos o objeto que vai criar a folha de respostas, se necessário
+    // 🟢 2. CÁLCULO DO NÚMERO DA O.S. (Isolado por Tenant)
+    const lastOs = await prisma.serviceOrder.findFirst({
+        where: { tenantId },
+        orderBy: { number: 'desc' },
+        select: { number: true }
+    });
+
+    // Se a empresa já tem O.S., pega a última e soma 1. Se não, começa da 1.
+    const nextNumber = lastOs ? lastOs.number + 1 : 1;
+
+    // 3. A Inteligência do Checklist (filtrando checklistTemplate pelo tenantId)
     let checklistData: Prisma.ServiceOrderChecklistCreateNestedOneWithoutServiceOrderInput | undefined = undefined;
 
-    // Só geramos checklist se for Preventiva ou Instalação
     if (data.type === 'PREVENTIVA' || data.type === 'INSTALACAO') {
         const template = await prisma.checklistTemplate.findFirst({
             where: {
                 modelId: equipment.modelId,
-                active: true // Só pega se o gabarito estiver ativo
+                tenantId,
+                active: true
             },
             include: {
                 questions: { orderBy: { order: 'asc' } }
             }
         });
 
-        // Se encontrou um gabarito com perguntas, montamos o "copy-paste"
         if (template && template.questions.length > 0) {
             checklistData = {
                 create: {
@@ -44,7 +56,7 @@ export const createServiceOrder = async (data: Omit<Prisma.ServiceOrderUnchecked
                         create: template.questions.map((q: any) => ({
                             question_text: q.text,
                             order: q.order,
-                            is_ok: false // Valor padrão inicial
+                            is_ok: false
                         }))
                     }
                 }
@@ -52,27 +64,29 @@ export const createServiceOrder = async (data: Omit<Prisma.ServiceOrderUnchecked
         }
     }
 
-    // 3. Montamos as queries para a transação
+    // 4. Montamos as queries para a transação
     const updateEquipmentQuery = prisma.equipment.update({
-        where: { id: data.equipmentId },
+        where: { id: data.equipmentId, tenantId },
         data: { status: 'REPARO' }
     });
 
     const createServiceOrderQuery = prisma.serviceOrder.create({
         data: {
             ...data,
+            number: nextNumber, // 🟢 Injetamos o número sequencial calculado
+            tenantId,
             openedById: loggedUserId,
-            checklist: checklistData // Injeta o checklist clonado aqui (se existir)
+            checklist: checklistData
         },
         include: {
             equipment: { include: { model: true } },
             customer: true,
-            checklist: { include: { answers: true } } // Retorna a O.S. já com as perguntas para o frontend ver!
+            checklist: { include: { answers: true } }
         }
     });
 
-    // 4. Executamos tudo em uma única tacada
-    const [updateEquipment, serviceOrder] = await prisma.$transaction([
+    // 5. Executamos tudo em uma única tacada
+    const [_, serviceOrder] = await prisma.$transaction([
         updateEquipmentQuery,
         createServiceOrderQuery
     ]);
@@ -80,17 +94,17 @@ export const createServiceOrder = async (data: Omit<Prisma.ServiceOrderUnchecked
     return serviceOrder;
 };
 
-export const listAllServiceOrders = async () => {
+export const listAllServiceOrders = async (tenantId: string) => {
     const OSList = await prisma.serviceOrder.findMany({
+        where: { tenantId },
         include: {
             equipment: {
                 select: {
-                    // description: true, <-- REMOVIDO PARA NÃO QUEBRAR
                     serial_number: true,
                     received_at: true,
                     returned_at: true,
                     status: true,
-                    model: {          // <-- NOVO: Busca o nome do modelo no catálogo!
+                    model: {
                         select: { name: true }
                     }
                 }
@@ -113,9 +127,9 @@ export const listAllServiceOrders = async () => {
     return OSList;
 };
 
-export const getServiceOrderById = async (id: string) => {
-    const serviceOrder = await prisma.serviceOrder.findUnique({
-        where: { id },
+export const getServiceOrderById = async (id: string, tenantId: string) => {
+    const serviceOrder = await prisma.serviceOrder.findFirst({
+        where: { id, tenantId },
         include: {
             equipment: {
                 select: {
@@ -140,15 +154,12 @@ export const getServiceOrderById = async (id: string) => {
             },
             openedBy: { select: { name: true, email: true } },
             closedBy: { select: { name: true, email: true } },
-
-            // 🟢 AQUI ESTÁ O FIX: Usamos o nome que o Prisma gerou
             serviceOrderEvents: {
                 orderBy: { created_at: 'desc' },
                 include: {
                     user: { select: { name: true } }
                 }
             },
-
             checklist: {
                 include: {
                     answers: { orderBy: { order: 'asc' } }
@@ -170,7 +181,6 @@ export const getServiceOrderById = async (id: string) => {
 
     if (!serviceOrder) throw new AppError('Ordem de serviço não encontrada', 404);
 
-    // 🟢 A MÁGICA: Separamos o serviceOrderEvents e devolvemos como "events" para o frontend
     const { serviceOrderEvents, ...osData } = serviceOrder as any;
 
     return {
@@ -194,20 +204,22 @@ export type UpdateOSData = Prisma.ServiceOrderUncheckedUpdateInput & {
     }[];
 };
 
-export const updateServiceOrder = async (id: string, payload: UpdateOSData, loggedUserId: string) => {
-    const { ...data } = payload;
+export const updateServiceOrder = async (
+    id: string,
+    tenantId: string,
+    payload: UpdateOSData,
+    loggedUserId: string
+) => {
+    const { tenantId: _, ...data } = payload as any;
 
-    // 1. Buscamos a O.S. já trazendo os dados do checklist anexado
-    const serviceOrder = await prisma.serviceOrder.findUnique({
-        where: { id },
-        include: { checklist: true } // <-- INCLUÍDO AQUI
+    const serviceOrder = await prisma.serviceOrder.findFirst({
+        where: { id, tenantId },
+        include: { checklist: true }
     });
 
     if (!serviceOrder) throw new AppError('Ordem de serviço não encontrada', 404);
 
-    // 🛡️ TRAVA DE SEGURANÇA DO CHECKLIST E TRAVA DE SEGURANÇA DA SOLUÇÃO
     if (data.status === 'FINALIZADA') {
-        // Se a O.S. possui um checklist, mas ele não tem data de conclusão (não foi respondido)
         if (serviceOrder.checklist && !serviceOrder.checklist.completed_at) {
             throw new AppError('Acesso negado. Não é possível finalizar a Ordem de Serviço pois o checklist obrigatório ainda não foi preenchido.', 403);
         }
@@ -227,7 +239,7 @@ export const updateServiceOrder = async (id: string, payload: UpdateOSData, logg
         const equipmentStatus = data.status === 'FINALIZADA' ? 'FINALIZADO' : 'OS_CANCELADA';
 
         const equipmentUpdateQuery = prisma.equipment.update({
-            where: { id: serviceOrder.equipmentId },
+            where: { id: serviceOrder.equipmentId, tenantId },
             data: {
                 status: equipmentStatus,
                 returned_at: new Date()
@@ -237,7 +249,7 @@ export const updateServiceOrder = async (id: string, payload: UpdateOSData, logg
     }
 
     const updateOSQuery = prisma.serviceOrder.update({
-        where: { id },
+        where: { id, tenantId },
         data: osDataToUpdate
     });
     queries.push(updateOSQuery);
@@ -246,13 +258,19 @@ export const updateServiceOrder = async (id: string, payload: UpdateOSData, logg
     return result[result.length - 1];
 };
 
-export const cancelServiceOrder = async (id: string, reason: string, loggedUserId: string) => {
-    // (O conteúdo desta função permanece inalterado, está perfeito)
-    const serviceOrder = await prisma.serviceOrder.findUnique({ where: { id } });
+export const cancelServiceOrder = async (
+    id: string,
+    tenantId: string,
+    reason: string,
+    loggedUserId: string
+) => {
+    const serviceOrder = await prisma.serviceOrder.findFirst({
+        where: { id, tenantId }
+    });
     if (!serviceOrder) throw new AppError('Ordem de serviço não encontrada', 404);
 
     const cancelServiceQuery = prisma.serviceOrder.update({
-        where: { id },
+        where: { id, tenantId },
         data: {
             status: 'CANCELADA',
             cancellation_reason: reason,
@@ -262,7 +280,7 @@ export const cancelServiceOrder = async (id: string, reason: string, loggedUserI
     });
 
     const updateEquipmentQuery = prisma.equipment.update({
-        where: { id: serviceOrder.equipmentId },
+        where: { id: serviceOrder.equipmentId, tenantId },
         data: { status: 'OS_CANCELADA' }
     });
 
@@ -271,8 +289,15 @@ export const cancelServiceOrder = async (id: string, reason: string, loggedUserI
     return { message: 'Ordem de serviço cancelada' };
 };
 
-export const reopenServiceOrder = async (id: string, loggedUserId: string, reason: string) => { // 🟢 Adicionado 'reason'
-    const serviceOrder = await prisma.serviceOrder.findUnique({ where: { id } });
+export const reopenServiceOrder = async (
+    id: string,
+    tenantId: string,
+    loggedUserId: string,
+    reason: string
+) => {
+    const serviceOrder = await prisma.serviceOrder.findFirst({
+        where: { id, tenantId }
+    });
     if (!serviceOrder) throw new AppError('Ordem de serviço não encontrada', 404);
 
     if (serviceOrder.status === 'ABERTA') {
@@ -280,7 +305,7 @@ export const reopenServiceOrder = async (id: string, loggedUserId: string, reaso
     }
 
     const reopenServiceQuery = prisma.serviceOrder.update({
-        where: { id },
+        where: { id, tenantId },
         data: {
             status: 'ABERTA',
             closed_at: null,
@@ -290,7 +315,7 @@ export const reopenServiceOrder = async (id: string, loggedUserId: string, reaso
     });
 
     const updateEquipmentQuery = prisma.equipment.update({
-        where: { id: serviceOrder.equipmentId },
+        where: { id: serviceOrder.equipmentId, tenantId },
         data: {
             status: 'REPARO',
             returned_at: null
@@ -302,7 +327,7 @@ export const reopenServiceOrder = async (id: string, loggedUserId: string, reaso
             serviceOrderId: id,
             userId: loggedUserId,
             action: 'REABERTURA',
-            notes: reason // 🟢 Agora gravamos o motivo real digitado pelo usuário
+            notes: reason
         }
     });
 
@@ -313,11 +338,11 @@ export const reopenServiceOrder = async (id: string, loggedUserId: string, reaso
 
 export const updateServiceOrderChecklist = async (
     serviceOrderId: string,
+    tenantId: string,
     payload: { notes?: string, answers: { id: string, is_ok: boolean, comment?: string; }[]; }
 ) => {
-    // 1. Verificamos se a O.S. existe e se ela tem um checklist atrelado
-    const os = await prisma.serviceOrder.findUnique({
-        where: { id: serviceOrderId },
+    const os = await prisma.serviceOrder.findFirst({
+        where: { id: serviceOrderId, tenantId },
         include: { checklist: true }
     });
 
@@ -327,16 +352,14 @@ export const updateServiceOrderChecklist = async (
 
     const queries = [];
 
-    // 2. Preparamos a atualização das notas gerais do checklist
     queries.push(prisma.serviceOrderChecklist.update({
         where: { id: os.checklist.id },
         data: {
             notes: payload.notes,
-            completed_at: new Date() // Marcamos a data e hora que o técnico finalizou
+            completed_at: new Date()
         }
     }));
 
-    // 3. Preparamos a atualização de cada resposta individualmente
     for (const answer of payload.answers) {
         queries.push(prisma.checklistAnswer.update({
             where: { id: answer.id },
@@ -347,40 +370,43 @@ export const updateServiceOrderChecklist = async (
         }));
     }
 
-    // 4. Disparamos a transação: ou salva todas as respostas, ou não salva nenhuma
     await prisma.$transaction(queries);
 
     return { message: 'Checklist preenchido e salvo com sucesso' };
 };
 
-export const addPartToServiceOrder = async (osId: string, partId: string, quantity: number, loggedUserId: string) => {
-    // 1. Verifica se a O.S. existe e se não está finalizada/cancelada
-    const os = await prisma.serviceOrder.findUnique({ where: { id: osId } });
+export const addPartToServiceOrder = async (
+    osId: string,
+    tenantId: string,
+    partId: string,
+    quantity: number,
+    loggedUserId: string
+) => {
+    const os = await prisma.serviceOrder.findFirst({
+        where: { id: osId, tenantId }
+    });
     if (!os) throw new AppError("Ordem de Serviço não encontrada.", 404);
     if (os.status !== 'ABERTA') throw new AppError("Não é possível adicionar peças em uma O.S. que não está aberta.", 403);
 
-    // 2. Verifica se a peça existe e tem estoque
-    const part = await prisma.part.findUnique({ where: { id: partId } });
+    const part = await prisma.part.findFirst({
+        where: { id: partId, tenantId }
+    });
     if (!part) throw new AppError("Peça não encontrada no catálogo.", 404);
 
     if (part.current_stock < quantity) {
         throw new AppError(`Estoque insuficiente. Saldo atual da peça '${part.name}': ${part.current_stock} un.`, 400);
     }
 
-    // 3. Transação: Grava na O.S, faz a Movimentação e Baixa o Estoque de uma vez só!
     const result = await prisma.$transaction([
-
-        // A) Adiciona a peça na O.S.
         prisma.partReplaced.create({
             data: {
                 serviceOrderId: osId,
                 partId: partId,
                 quantity: quantity,
-                unit_price: part.sale_price // Congela o preço de venda da DWL Diagnostica no momento do uso
+                unit_price: part.sale_price
             }
         }),
 
-        // B) Gera o log de auditoria no estoque
         prisma.stockMovement.create({
             data: {
                 partId: partId,
@@ -392,9 +418,8 @@ export const addPartToServiceOrder = async (osId: string, partId: string, quanti
             }
         }),
 
-        // C) Abate o saldo físico da peça atomicamente
         prisma.part.update({
-            where: { id: partId },
+            where: { id: partId, tenantId },
             data: {
                 current_stock: {
                     decrement: quantity
@@ -403,21 +428,25 @@ export const addPartToServiceOrder = async (osId: string, partId: string, quanti
         })
     ]);
 
-    return result[0]; // Retorna o registro da peça adicionada
+    return result[0];
 };
 
-export const saveClientSignature = async (id: string, signatureBase64: string) => {
-    // 1. Verifica se a O.S. existe e se ainda está aberta
-    const os = await prisma.serviceOrder.findUnique({ where: { id } });
+export const saveClientSignature = async (
+    id: string,
+    tenantId: string,
+    signatureBase64: string
+) => {
+    const os = await prisma.serviceOrder.findFirst({
+        where: { id, tenantId }
+    });
 
     if (!os) throw new AppError('Ordem de serviço não encontrada.', 404);
     if (os.status !== 'ABERTA') {
         throw new AppError('Não é possível adicionar uma assinatura em uma O.S. finalizada ou cancelada.', 403);
     }
 
-    // 2. Salva a string Base64 direto no banco
     const updatedOS = await prisma.serviceOrder.update({
-        where: { id },
+        where: { id, tenantId },
         data: { client_signature: signatureBase64 },
         select: { id: true, client_signature: true }
     });
@@ -425,11 +454,15 @@ export const saveClientSignature = async (id: string, signatureBase64: string) =
     return updatedOS;
 };
 
-export const generateServiceOrderPdf = async (id: string) => {
-    // 1. Busca todos os dados da O.S. (agora incluindo o checklist completo)
-    const os = await prisma.serviceOrder.findUnique({
-        where: { id },
+// 🟢 FUNÇÃO SUPORTA CHAMADA PÚBLICA (QR CODE) E PRIVADA
+export const generateServiceOrderPdf = async (id: string, tenantId?: string) => {
+    const os = await prisma.serviceOrder.findFirst({
+        where: {
+            id,
+            ...(tenantId ? { tenantId } : {})
+        },
         include: {
+            tenant: true, // 🟢 Trazemos a empresa para pegar o nome
             customer: true,
             equipment: { include: { model: true } },
             parts_replaced: { include: { part: true } },
@@ -438,7 +471,6 @@ export const generateServiceOrderPdf = async (id: string) => {
                 orderBy: { created_at: 'asc' },
                 include: { user: { select: { name: true } } }
             },
-            // 🟢 NOVO: Trazendo o checklist e as respostas ordenadas
             checklist: {
                 include: { answers: { orderBy: { order: 'asc' } } }
             }
@@ -459,7 +491,6 @@ export const generateServiceOrderPdf = async (id: string) => {
             reason: event.notes || 'Não informado'
         }));
 
-    // 🟢 PREPARANDO DADOS DO CHECKLIST PARA O TEMPLATE
     let checklistData = null;
     if (os.checklist && os.checklist.answers.length > 0) {
         checklistData = {
@@ -490,13 +521,17 @@ export const generateServiceOrderPdf = async (id: string) => {
         const logoBuffer = fs.readFileSync(logoPath);
         logoBase64 = `data:image/png;base64,${logoBuffer.toString('base64')}`;
     } catch (err) {
-        console.warn('Logo da empresa não encontrada na pasta assets.');
+        // Logo genérica ou erro ignorado. Mais pra frente o Tenant pode ter sua própria logo.
+        console.warn('Logo padrão não encontrada na pasta assets.');
     }
 
     const dateToPrint = os.closed_at ? new Date(os.closed_at) : new Date();
     const formattedClosingDate = new Intl.DateTimeFormat('pt-BR', { dateStyle: 'long' }).format(dateToPrint);
 
     const templateData = {
+        tenant: {
+            name: os.tenant?.name || 'Assistência Técnica'
+        },
         os: {
             number: os.number,
             type: os.type,
@@ -541,8 +576,6 @@ export const generateServiceOrderPdf = async (id: string) => {
         currentDate: formattedClosingDate,
         hasReopenEvents: reopenEvents.length > 0,
         reopenEvents,
-
-        // 🟢 NOVAS VARIÁVEIS INJETADAS NO HANDLEBARS
         hasChecklist: !!checklistData,
         checklist: checklistData
     };
@@ -559,11 +592,11 @@ export const generateServiceOrderPdf = async (id: string) => {
     return setFullURL(`/uploads/os_pdfs/${fileName}`);
 };
 
-export const sendServiceOrderEmail = async (id: string, customEmail?: string) => {
-    // 1. Busca os dados essenciais para o e-mail
-    const os = await prisma.serviceOrder.findUnique({
-        where: { id },
+export const sendServiceOrderEmail = async (id: string, tenantId: string, customEmail?: string) => {
+    const os = await prisma.serviceOrder.findFirst({
+        where: { id, tenantId },
         include: {
+            tenant: true, // 🟢 Trazemos a empresa
             customer: true,
             equipment: { include: { model: true } }
         }
@@ -571,22 +604,17 @@ export const sendServiceOrderEmail = async (id: string, customEmail?: string) =>
 
     if (!os) throw new AppError('Ordem de serviço não encontrada', 404);
 
-    // 2. Define o destinatário (prioriza o e-mail digitado no tablet, ou usa o do cadastro)
     const recipientEmail = customEmail || os.customer.email;
 
     if (!recipientEmail) {
         throw new AppError('Nenhum e-mail de destino foi informado e o cliente não possui e-mail cadastrado.', 400);
     }
 
-    // 3. Garante que o PDF esteja atualizado e pega o caminho dele
-    // A nossa função já faz toda a matemática e gera o arquivo físico
-    const pdfRelativeUrl = await generateServiceOrderPdf(id);
+    const pdfRelativeUrl = await generateServiceOrderPdf(id, tenantId);
 
-    // Transforma "/uploads/os_pdfs/arquivo.pdf" no caminho físico absoluto do servidor
     const fileName = pdfRelativeUrl.split('/').pop() as string;
     const pdfPhysicalPath = path.resolve(process.cwd(), 'uploads', 'os_pdfs', fileName);
 
-    // 4. Prepara o Corpo do E-mail (HTML)
     const templatePath = path.resolve(process.cwd(), 'src', 'templates', 'os-email.hbs');
     const templateFile = fs.readFileSync(templatePath, 'utf-8');
     const compileTemplate = handlebars.compile(templateFile);
@@ -594,17 +622,17 @@ export const sendServiceOrderEmail = async (id: string, customEmail?: string) =>
 
     const htmlBody = compileTemplate({
         customerName: os.customer.name,
+        tenantName: os.tenant.name, // 🟢 Passamos para o template do E-mail
         osNumber: `${os.number}/${new Date(os.opened_at).getFullYear()}`,
         equipmentModel: os.equipment?.model.name || 'Não especificado',
         serialNumber: os.equipment?.serial_number || 'Não especificado'
     });
 
-    // 5. Instancia o Provedor e Dispara
     const mailProvider = new MailProvider();
 
     await mailProvider.sendMail({
         to: recipientEmail,
-        subject: `DWL Diagnóstica - Relatório Técnico da O.S. ${os.number}`,
+        subject: `${os.tenant.name} - Relatório Técnico da O.S. ${os.number}`, // 🟢 Assunto Dinâmico
         body: htmlBody,
         attachments: [
             {
@@ -613,9 +641,10 @@ export const sendServiceOrderEmail = async (id: string, customEmail?: string) =>
                 contentType: 'application/pdf'
             },
             {
+                // Se a imagem não existir, o Nodemailer não anexa. Cuidado se apagar o arquivo fisicamente.
                 filename: 'logo.png',
                 path: logoPath,
-                cid: 'logo_dwl' // Esse é o "apelido" que vamos chamar no HTML
+                cid: 'logo_dwl'
             }
         ]
     });
@@ -623,15 +652,15 @@ export const sendServiceOrderEmail = async (id: string, customEmail?: string) =>
     return { message: 'E-mail enviado com sucesso!', recipient: recipientEmail };
 };
 
-export const generateNiimbotLabel = async (id: string) => {
-    const os = await prisma.serviceOrder.findUnique({
-        where: { id },
+export const generateNiimbotLabel = async (id: string, tenantId: string) => {
+    const os = await prisma.serviceOrder.findFirst({
+        where: { id, tenantId },
         include: { equipment: true }
     });
 
     if (!os) throw new AppError('Ordem de serviço não encontrada', 404);
 
-    const baseUrl = process.env.BACKEND_URL || 'https://tech-support-api-zk62.onrender.com';
+    const baseUrl = process.env.BACKEND_URL || 'http://localhost:3333';
     const osUrl = `${baseUrl}/api/serviceorder/${os.id}/qr-pdf`;
 
     const qrCodeDataUrl = await QRCode.toDataURL(osUrl, { margin: 1 });
@@ -647,7 +676,6 @@ export const generateNiimbotLabel = async (id: string) => {
     if (os.type === 'PREVENTIVA') osTypeStr = 'Preventiva';
     if (os.type === 'INSTALACAO') osTypeStr = 'Instalação';
 
-    // 🟢 Busca e converte a logo para a etiqueta
     const logoPath = path.resolve(process.cwd(), 'src', 'assets', 'logo_dwl.png');
     let logoBase64 = '';
     try {
@@ -675,7 +703,7 @@ export const generateNiimbotLabel = async (id: string) => {
         templateName: 'label',
         data: templateData,
         fileName,
-        width: '50mm', // 🟢 Ajustado para 50mm
+        width: '50mm',
         height: '30mm',
         margin: { top: '0', bottom: '0', left: '0', right: '0' }
     });
@@ -683,14 +711,20 @@ export const generateNiimbotLabel = async (id: string) => {
     return setFullURL(`/uploads/os_pdfs/${fileName}`);
 };
 
-export const addServiceOrderImage = async (osId: string, tag: 'ANTES' | 'DURANTE' | 'DEPOIS', tmpFileName: string) => {
-    const os = await prisma.serviceOrder.findUnique({ where: { id: osId } });
+export const addServiceOrderImage = async (
+    osId: string,
+    tenantId: string,
+    tag: 'ANTES' | 'DURANTE' | 'DEPOIS',
+    tmpFileName: string
+) => {
+    const os = await prisma.serviceOrder.findFirst({
+        where: { id: osId, tenantId }
+    });
     if (!os) throw new AppError('Ordem de serviço não encontrada', 404);
 
     const storageProvider = new DiskStorageProvider();
     const finalFileName = `os-${os.number}-${new Date().getTime()}`;
 
-    // Converte para WebP e move da pasta tmp para a pasta os_images
     const savedFileName = await storageProvider.saveFile(tmpFileName, 'os_images', finalFileName);
 
     const image = await prisma.serviceOrderImage.create({
@@ -707,15 +741,20 @@ export const addServiceOrderImage = async (osId: string, tag: 'ANTES' | 'DURANTE
     };
 };
 
-export const removeServiceOrderImage = async (imageId: string) => {
-    const image = await prisma.serviceOrderImage.findUnique({ where: { id: imageId } });
+export const removeServiceOrderImage = async (imageId: string, tenantId: string) => {
+    const image = await prisma.serviceOrderImage.findFirst({
+        where: {
+            id: imageId,
+            serviceOrder: {
+                tenantId
+            }
+        }
+    });
     if (!image) throw new AppError('Imagem não encontrada', 404);
 
-    // Remove fisicamente o arquivo do servidor
     const storageProvider = new DiskStorageProvider();
     await storageProvider.deleteFile(image.url, 'os_images');
 
-    // Remove a referência do banco de dados
     await prisma.serviceOrderImage.delete({ where: { id: imageId } });
 
     return { message: 'Imagem removida com sucesso' };

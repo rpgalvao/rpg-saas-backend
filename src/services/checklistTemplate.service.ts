@@ -5,19 +5,19 @@ import { prisma } from "../libs/prisma";
 // 1. GERENCIAMENTO DO TEMPLATE (Cabeçalho)
 // ==========================================
 
-export const createTemplate = async (data: { name: string, modelId: string; }) => {
-    // Verifica se o modelo de equipamento existe no catálogo
-    const modelExists = await prisma.equipmentModel.findUnique({
-        where: { id: data.modelId }
+export const createTemplate = async (data: { name: string, modelId: string; }, tenantId: string) => {
+    // Verifica se o modelo de equipamento existe no catálogo do mesmo tenant
+    const modelExists = await prisma.equipmentModel.findFirst({
+        where: { id: data.modelId, tenantId }
     });
 
     if (!modelExists || !modelExists.active) {
         throw new AppError('Modelo de equipamento não encontrado', 404);
     }
 
-    // Evita templates duplicados com o mesmo nome para o mesmo modelo
+    // Evita templates duplicados com o mesmo nome para o mesmo modelo no mesmo tenant
     const templateExists = await prisma.checklistTemplate.findFirst({
-        where: { name: data.name, modelId: data.modelId }
+        where: { name: data.name, modelId: data.modelId, tenantId }
     });
 
     if (templateExists) {
@@ -25,15 +25,21 @@ export const createTemplate = async (data: { name: string, modelId: string; }) =
     }
 
     const newTemplate = await prisma.checklistTemplate.create({
-        data
+        data: {
+            ...data,
+            tenantId
+        }
     });
 
     return newTemplate;
 };
 
-export const listAllTemplates = async (includeInactive: boolean = false) => {
+export const listAllTemplates = async (tenantId: string, includeInactive: boolean = false) => {
     const checklistTemplates = await prisma.checklistTemplate.findMany({
-        where: includeInactive ? undefined : { active: true },
+        where: {
+            tenantId,
+            ...(includeInactive ? {} : { active: true })
+        },
         include: {
             questions: {
                 orderBy: { order: 'asc' }
@@ -42,16 +48,13 @@ export const listAllTemplates = async (includeInactive: boolean = false) => {
         }
     });
 
-    if (!checklistTemplates) throw new AppError('Nenhum gabarito foi encontrado', 404);
-
     return checklistTemplates;
 };
 
-export const getTemplateById = async (id: string) => {
-    const template = await prisma.checklistTemplate.findUnique({
-        where: { id, active: true },
+export const getTemplateById = async (id: string, tenantId: string) => {
+    const template = await prisma.checklistTemplate.findFirst({
+        where: { id, tenantId, active: true },
         include: {
-            // O pulo do gato: já trazemos as perguntas ordenadas para o Frontend!
             questions: {
                 orderBy: { order: 'asc' }
             }
@@ -65,20 +68,45 @@ export const getTemplateById = async (id: string) => {
     return template;
 };
 
-export const updateTemplate = async (id: string, data: { name?: string, modelId?: string; }) => {
-    const template = await prisma.checklistTemplate.findUnique({ where: { id } });
+export const updateTemplate = async (
+    id: string,
+    tenantId: string,
+    data: { name?: string, modelId?: string; }
+) => {
+    const template = await prisma.checklistTemplate.findFirst({
+        where: { id, tenantId }
+    });
     if (!template) throw new AppError('Template não encontrado', 404);
 
-    if (data.name && data.modelId) {
+    if (data.modelId) {
+        const modelExists = await prisma.equipmentModel.findFirst({
+            where: { id: data.modelId, tenantId }
+        });
+        if (!modelExists || !modelExists.active) {
+            throw new AppError('Modelo de equipamento não encontrado', 404);
+        }
+    }
+
+    const targetName = data.name || template.name;
+    const targetModelId = data.modelId || template.modelId;
+
+    if (data.name || data.modelId) {
         const templateExists = await prisma.checklistTemplate.findFirst({
-            where: { name: data.name, modelId: data.modelId, id: { not: id } }
+            where: {
+                name: targetName,
+                modelId: targetModelId,
+                tenantId,
+                id: { not: id }
+            }
         });
         if (templateExists) throw new AppError('Já existe um template com este nome para este modelo', 409);
     }
 
+    const { tenantId: _, ...safeData } = data as any;
+
     return await prisma.checklistTemplate.update({
-        where: { id },
-        data
+        where: { id, tenantId },
+        data: safeData
     });
 };
 
@@ -86,10 +114,14 @@ export const updateTemplate = async (id: string, data: { name?: string, modelId?
 // 2. GERENCIAMENTO DAS PERGUNTAS
 // ==========================================
 
-export const addQuestionToTemplate = async (templateId: string, data: { text: string, order: number; }) => {
-    // Garante que o template onde vamos plugar a pergunta existe
-    const templateExists = await prisma.checklistTemplate.findUnique({
-        where: { id: templateId }
+export const addQuestionToTemplate = async (
+    templateId: string,
+    tenantId: string,
+    data: { text: string, order: number; }
+) => {
+    // Garante que o template onde vamos plugar a pergunta pertence ao tenant
+    const templateExists = await prisma.checklistTemplate.findFirst({
+        where: { id: templateId, tenantId }
     });
 
     if (!templateExists) {
@@ -116,8 +148,18 @@ export const addQuestionToTemplate = async (templateId: string, data: { text: st
     return newQuestion;
 };
 
-export const updateQuestion = async (questionId: string, data: { text?: string, order?: number; }) => {
-    const question = await prisma.checklistQuestion.findUnique({ where: { id: questionId } });
+export const updateQuestion = async (
+    questionId: string,
+    tenantId: string,
+    data: { text?: string, order?: number; }
+) => {
+    // Valida que a pergunta pertence a um template do tenant
+    const question = await prisma.checklistQuestion.findFirst({
+        where: {
+            id: questionId,
+            template: { tenantId }
+        }
+    });
     if (!question) throw new AppError('Pergunta não encontrada', 404);
 
     if (data.order && data.order !== question.order) {
@@ -137,9 +179,9 @@ export const updateQuestion = async (questionId: string, data: { text?: string, 
 // 3. MANUTENÇÃO (Desativar Template e Apagar Pergunta)
 // ==========================================
 
-export const toggleTemplateStatus = async (id: string) => {
-    const template = await prisma.checklistTemplate.findUnique({
-        where: { id }
+export const toggleTemplateStatus = async (id: string, tenantId: string) => {
+    const template = await prisma.checklistTemplate.findFirst({
+        where: { id, tenantId }
     });
 
     if (!template) {
@@ -147,16 +189,20 @@ export const toggleTemplateStatus = async (id: string) => {
     }
 
     const updatedTemplate = await prisma.checklistTemplate.update({
-        where: { id },
+        where: { id, tenantId },
         data: { active: !template.active }
     });
 
     return updatedTemplate;
 };
 
-export const deleteQuestion = async (questionId: string) => {
-    const question = await prisma.checklistQuestion.findUnique({
-        where: { id: questionId }
+export const deleteQuestion = async (questionId: string, tenantId: string) => {
+    // Valida que a pergunta pertence a um template do tenant antes de deletar
+    const question = await prisma.checklistQuestion.findFirst({
+        where: {
+            id: questionId,
+            template: { tenantId }
+        }
     });
 
     if (!question) {

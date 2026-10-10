@@ -9,23 +9,29 @@ export const createTemplate: RequestHandler = async (req, res) => {
     if (req.user.role !== 'ADMIN') {
         throw new AppError('Acesso negado. Apenas administradores podem criar gabaritos de checklist.', 403);
     }
+    const { tenantId } = req.user;
 
     const data = createChecklistTemplateSchema.parse(req.body);
-    const newTemplate = await ChecklistTemplateService.createTemplate(data);
+    const newTemplate = await ChecklistTemplateService.createTemplate(data, tenantId);
 
     res.status(201).json({ success: true, data: newTemplate });
 };
 
 export const listTemplates: RequestHandler = async (req, res) => {
+    if (!req.user) throw new AppError('Usuário não autenticado', 401);
+    const { tenantId } = req.user;
+
     const includeInactive = req.query.includeInactive === 'true';
-    const templates = await ChecklistTemplateService.listAllTemplates(includeInactive);
+    const templates = await ChecklistTemplateService.listAllTemplates(tenantId, includeInactive);
     res.json({ success: true, data: templates });
 };
 
 export const getTemplateById: RequestHandler = async (req, res) => {
-    // Busca aberta para leitura
+    if (!req.user) throw new AppError('Usuário não autenticado', 401);
+    const { tenantId } = req.user;
+
     const { id } = checklistTemplateIdSchema.parse(req.params);
-    const template = await ChecklistTemplateService.getTemplateById(id);
+    const template = await ChecklistTemplateService.getTemplateById(id, tenantId);
 
     res.json({ success: true, data: template });
 };
@@ -36,11 +42,12 @@ export const addQuestionToTemplate: RequestHandler = async (req, res) => {
     if (req.user.role !== 'ADMIN') {
         throw new AppError('Acesso negado. Apenas administradores podem adicionar perguntas ao gabarito.', 403);
     }
+    const { tenantId } = req.user;
 
     const { id } = checklistTemplateIdSchema.parse(req.params);
     const data = addChecklistQuestionSchema.parse(req.body);
 
-    const newQuestion = await ChecklistTemplateService.addQuestionToTemplate(id, data);
+    const newQuestion = await ChecklistTemplateService.addQuestionToTemplate(id, tenantId, data);
 
     res.status(201).json({ success: true, data: newQuestion });
 };
@@ -49,9 +56,10 @@ export const toggleTemplateStatus: RequestHandler = async (req, res) => {
     if (!req.user || req.user.role !== 'ADMIN') {
         throw new AppError('Acesso negado. Apenas administradores podem desativar gabaritos.', 403);
     }
+    const { tenantId } = req.user;
 
     const { id } = checklistTemplateIdSchema.parse(req.params);
-    const updatedTemplate = await ChecklistTemplateService.toggleTemplateStatus(id);
+    const updatedTemplate = await ChecklistTemplateService.toggleTemplateStatus(id, tenantId);
 
     res.json({ success: true, data: updatedTemplate });
 };
@@ -60,26 +68,32 @@ export const deleteQuestion: RequestHandler = async (req, res) => {
     if (!req.user || req.user.role !== 'ADMIN') {
         throw new AppError('Acesso negado. Apenas administradores podem remover perguntas.', 403);
     }
+    const { tenantId } = req.user;
+
     const { questionId } = questionIdSchema.parse(req.params);
-    await ChecklistTemplateService.deleteQuestion(questionId);
+    await ChecklistTemplateService.deleteQuestion(questionId, tenantId);
 
     res.json({ success: true, message: 'Pergunta removida com sucesso' });
 };
 
 export const updateTemplate: RequestHandler = async (req, res) => {
     if (!req.user || req.user.role !== 'ADMIN') throw new AppError('Acesso negado.', 403);
+    const { tenantId } = req.user;
+
     const { id } = checklistTemplateIdSchema.parse(req.params);
     const data = updateChecklistTemplateSchema.parse(req.body);
 
-    const updatedTemplate = await ChecklistTemplateService.updateTemplate(id, data);
+    const updatedTemplate = await ChecklistTemplateService.updateTemplate(id, tenantId, data);
     res.json({ success: true, data: updatedTemplate });
 };
 
 export const updateQuestion: RequestHandler = async (req, res) => {
     if (!req.user || req.user.role !== 'ADMIN') throw new AppError('Acesso negado.', 403);
+    const { tenantId } = req.user;
+
     const { questionId } = questionIdSchema.parse(req.params);
     const data = updateChecklistQuestionSchema.parse(req.body);
 
-    const updatedQuestion = await ChecklistTemplateService.updateQuestion(questionId, data);
+    const updatedQuestion = await ChecklistTemplateService.updateQuestion(questionId, tenantId, data);
     res.json({ success: true, data: updatedQuestion });
 };

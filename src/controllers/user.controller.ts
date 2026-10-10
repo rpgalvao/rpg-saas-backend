@@ -5,14 +5,20 @@ import { AppError } from "../errors/AppError";
 import fs from "fs/promises";
 
 export const createUser: RequestHandler = async (req, res) => {
+    if (!req.user) throw new AppError('Usuário não autenticado', 401);
+    const { tenantId } = req.user;
+
     const data = createUserSchema.parse(req.body);
-    const user = await UserService.createUser(data);
+    const user = await UserService.createUser(data, tenantId);
     res.status(201).json({ success: true, data: user });
 };
 
 export const listUsers: RequestHandler = async (req, res) => {
+    if (!req.user) throw new AppError('Usuário não autenticado', 401);
+    const { tenantId } = req.user;
+
     const includeInactive = req.query.includeInactive === 'true';
-    const users = await UserService.getUsersList(includeInactive);
+    const users = await UserService.getUsersList(tenantId, includeInactive);
     res.json({ success: true, data: users });
 };
 
@@ -20,18 +26,23 @@ export const toggleUserStatus: RequestHandler = async (req, res) => {
     if (!req.user || req.user.role !== 'ADMIN') {
         throw new AppError('Acesso negado. Apenas administradores podem alterar o status.', 403);
     }
+    const { tenantId } = req.user;
     const { id } = getUserByIdSchema.parse(req.params);
+
     if (req.user.id === id) {
         throw new AppError('Você não pode alterar o próprio status no sistema.', 400);
     }
 
-    const message = await UserService.toggleUserStatus(id);
+    const message = await UserService.toggleUserStatus(id, tenantId);
     res.json({ success: true, message });
 };
 
 export const getUserById: RequestHandler = async (req, res) => {
-    const { id } = req.params;
-    const user = await UserService.getUserById(id as string);
+    if (!req.user) throw new AppError('Usuário não autenticado', 401);
+    const { tenantId } = req.user;
+
+    const { id } = getUserByIdSchema.parse(req.params);
+    const user = await UserService.getUserById(id, tenantId);
     res.json({ success: true, data: user });
 };
 
@@ -42,6 +53,7 @@ export const updateUser: RequestHandler = async (req, res, next) => {
 
     try {
         if (!loggedUser) throw new AppError('Usuário não autenticado', 401);
+        const { tenantId } = loggedUser;
 
         // Permite se for o próprio usuário editando seu perfil ou um ADMIN editando qualquer um
         if (loggedUser.id !== id && loggedUser.role !== 'ADMIN') {
@@ -58,7 +70,7 @@ export const updateUser: RequestHandler = async (req, res, next) => {
         if (file) {
             data.avatar_url = file.filename;
         }
-        const updatedUser = await UserService.updateUser(id, data);
+        const updatedUser = await UserService.updateUser(id, tenantId, data);
 
         res.json({ success: true, data: updatedUser });
 
@@ -74,6 +86,7 @@ export const removeUser: RequestHandler = async (req, res) => {
     if (!req.user || req.user.role !== 'ADMIN') {
         throw new AppError('Acesso negado. Apenas administradores podem desativar usuários.', 403);
     }
+    const { tenantId } = req.user;
 
     const { id } = getUserByIdSchema.parse(req.params);
 
@@ -81,6 +94,6 @@ export const removeUser: RequestHandler = async (req, res) => {
         throw new AppError('Você não pode desativar seu próprio usuário no sistema.', 400);
     }
 
-    const message = await UserService.deactivateUser(id);
+    const message = await UserService.deactivateUser(id, tenantId);
     res.json({ success: true, message });
 };

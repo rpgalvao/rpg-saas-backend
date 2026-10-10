@@ -1,9 +1,16 @@
 import { prisma } from "../libs/prisma";
 
-export const getDashboardMetrics = async () => {
-    // 1. MÉTRICAS DOS CARDS
-    const openOrders = await prisma.serviceOrder.count({ where: { status: 'ABERTA' } });
-    const completedOS = await prisma.serviceOrder.count({ where: { status: 'FINALIZADA' } });
+export const getDashboardMetrics = async (tenantId: string) => {
+    // ==========================================
+    // 1. MÉTRICAS DOS CARDS (Com tenantId)
+    // ==========================================
+    const openOrders = await prisma.serviceOrder.count({
+        where: { status: 'ABERTA', tenantId }
+    });
+
+    const completedOS = await prisma.serviceOrder.count({
+        where: { status: 'FINALIZADA', tenantId }
+    });
 
     const now = new Date();
     const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
@@ -11,11 +18,14 @@ export const getDashboardMetrics = async () => {
     const finishedOrdersThisMonth = await prisma.serviceOrder.count({
         where: {
             status: 'FINALIZADA',
-            updated_at: { gte: startOfMonth }
+            updated_at: { gte: startOfMonth },
+            tenantId
         }
     });
 
-    const totalEquipments = await prisma.equipment.count();
+    const totalEquipments = await prisma.equipment.count({
+        where: { tenantId }
+    });
 
     // ==========================================
     // 2. DADOS DO GRÁFICO DE BARRAS (Últimos 6 meses)
@@ -27,6 +37,7 @@ export const getDashboardMetrics = async () => {
 
     const recentOrders = await prisma.serviceOrder.findMany({
         where: {
+            tenantId, // 🟢 Isolamento
             OR: [
                 { opened_at: { gte: sixMonthsAgo } },
                 { updated_at: { gte: sixMonthsAgo } }
@@ -70,7 +81,8 @@ export const getDashboardMetrics = async () => {
         where: {
             status: 'FINALIZADA',
             closed_at: { not: null },
-            closedById: { not: null }
+            closedById: { not: null },
+            tenantId // 🟢 Isolamento para não puxar técnicos de outra assistência
         },
         select: {
             opened_at: true,
@@ -107,6 +119,7 @@ export const getDashboardMetrics = async () => {
     // 4. ATIVIDADES RECENTES
     // ==========================================
     const recentActivities = await prisma.serviceOrder.findMany({
+        where: { tenantId }, // 🟢 Isolamento
         take: 5,
         orderBy: { updated_at: 'desc' },
         select: {
@@ -125,7 +138,7 @@ export const getDashboardMetrics = async () => {
         totalEquipments,
         finishedOrdersThisMonth,
         chartData,
-        techMetrics, // 🟢 NOVA MÉTRICA DEVOLVIDA
+        techMetrics,
         recentActivities
     };
 };
