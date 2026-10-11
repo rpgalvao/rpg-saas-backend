@@ -1,10 +1,10 @@
 import z from "zod";
 
 export const createEquipmentSchema = z.object({
-    customerId: z.uuid().optional(),
-    modelId: z.string().uuid('ID do modelo de equipamento inválido'), // <-- ADICIONADO
+    customerId: z.uuid().nullable().optional(),
+    modelId: z.uuid('ID do modelo de equipamento inválido'),
     serial_number: z.string().min(2, 'O número de série do equipamento precisa ter pelo menos 2 caracteres').toUpperCase(),
-    status: z.enum(['EM_ANALISE', 'REPARO', 'FINALIZADO']).optional(),
+    status: z.enum(['INSTALADO', 'RECEBIDO', 'EM_ANALISE', 'REPARO', 'FINALIZADO']).optional(),
 });
 
 export const getEquipmentListSchema = z.object({
@@ -21,8 +21,8 @@ export const getEquipmentSerialNumberSchema = z.object({
 });
 
 export const updateEquipmentSchema = z.object({
-    customerId: z.uuid().optional(),
-    modelId: z.string().uuid('ID do modelo de equipamento inválido').optional(), // <-- ADICIONADO
+    customerId: z.uuid().nullable().optional(),
+    modelId: z.uuid('ID do modelo de equipamento inválido').optional(),
     serial_number: z.string().min(2, 'O número de série do equipamento precisa ter pelo menos 2 caracteres').toUpperCase().optional(),
-    status: z.enum(['EM_ANALISE', 'REPARO', 'FINALIZADO']).optional(),
+    status: z.enum(['INSTALADO', 'RECEBIDO', 'EM_ANALISE', 'REPARO', 'FINALIZADO']).optional(),
 });

@@ -7,7 +7,7 @@ export const createPartSchema = z.object({
     sale_price: z.coerce.number().min(0, "O preço de venda não pode ser negativo"),
     current_stock: z.coerce.number().int().min(0).default(0),
     min_stock: z.coerce.number().int().min(0).default(0),
-    supplierId: z.string().uuid("ID do fornecedor inválido").optional().nullable()
+    supplierId: z.uuid("ID do fornecedor inválido").optional().nullable()
 });
 
 export const updatePartSchema = z.object({
@@ -17,6 +17,6 @@ export const updatePartSchema = z.object({
     sale_price: z.coerce.number().min(0).optional(),
     current_stock: z.coerce.number().int().min(0).optional(),
     min_stock: z.coerce.number().int().min(0).optional(),
-    supplierId: z.string().uuid().optional().nullable(),
+    supplierId: z.uuid().optional().nullable(),
     active: z.boolean().optional()
 });
