@@ -1,0 +1,462 @@
+<html lang="pt-BR">
+	<head>
+		<meta charset="UTF-8" />
+		<title>Relatório de Manutenção</title>
+		<link
+			href="https://fonts.googleapis.com/css2?family=Open+Sans:wght@400;600;700&display=swap"
+			rel="stylesheet"
+		/>
+		<style>
+			/* 🟢 1. Redução geral de espaçamentos no corpo */
+			body {
+				font-family: "Open Sans", sans-serif;
+				font-size: 11px;
+				color: #333;
+				margin: 0;
+				padding: 15px; /* Reduzido de 20px */
+			}
+			.header {
+				display: flex;
+				justify-content: space-between;
+				align-items: center;
+				border-bottom: 2px solid #225378;
+				padding-bottom: 5px; /* Reduzido */
+				margin-bottom: 10px; /* Reduzido */
+			}
+			.header img {
+				max-height: 45px; /* Levemente menor */
+			}
+			.header-title h2 {
+				color: #225378;
+				margin: 0;
+				font-weight: 700;
+				font-size: 16px;
+			}
+			.header-title span {
+				font-size: 9px;
+				color: #70808f;
+			}
+			.header-info {
+				text-align: right;
+				font-size: 10px;
+				color: #70808f;
+			}
+			.title {
+				text-align: center;
+				font-size: 15px; /* Reduzido de 18px */
+				font-weight: bold;
+				color: #225378;
+				margin-bottom: 10px; /* Reduzido */
+				text-transform: uppercase;
+			}
+			/* 🟢 2. Caixas e Títulos mais enxutos */
+			.section-title {
+				background-color: #3796af;
+				color: #f5f5f5;
+				font-weight: 600;
+				padding: 4px 6px; /* Reduzido */
+				font-size: 11px;
+				border: 1px solid #3796af;
+				margin-top: 10px; /* Reduzido */
+				border-radius: 4px 4px 0 0;
+			}
+			table {
+				width: 100%;
+				border-collapse: collapse;
+				margin-bottom: 10px; /* Reduzido */
+			}
+			table,
+			th,
+			td {
+				border: 1px solid #70808f;
+			}
+			th,
+			td {
+				padding: 4px 6px; /* Linhas de tabela mais finas */
+			}
+			.text-box {
+				border: 1px solid #70808f;
+				border-top: none;
+				padding: 6px 10px; /* Reduzido */
+				min-height: 25px; /* Reduzido drasticamente para evitar espaços vazios */
+				margin-bottom: 10px; /* Reduzido */
+				border-radius: 0 0 4px 4px;
+			}
+			.parts-table th,
+			.parts-table td {
+				padding: 3px 4px;
+				font-size: 10px;
+				color: #444;
+			}
+			.bottom-section {
+				display: flex;
+				justify-content: space-between;
+				align-items: flex-start;
+				margin-top: 15px;
+				page-break-inside: avoid; /* Evita quebra de página no meio do resumo */
+			}
+			.warranty-box {
+				width: 50%;
+				border: 1px solid #70808f;
+				border-radius: 4px;
+				padding: 8px;
+				font-size: 9px;
+				color: #555;
+				background-color: #f8fafc;
+			}
+			.financial-summary {
+				width: 45%;
+				margin-bottom: 0;
+			}
+			.financial-summary th,
+			.financial-summary td {
+				padding: 2px 4px;
+				font-size: 10px;
+			}
+
+			/* 🟢 3. Bloco de Assinaturas Totalmente Refatorado */
+			.signatures {
+				display: flex;
+				justify-content: space-between;
+				text-align: center;
+				margin-top: 20px; /* Espaço muito menor */
+				page-break-inside: avoid; /* Trava as assinaturas na mesma página se possível */
+			}
+			.signature-box {
+				width: 45%;
+				display: flex;
+				flex-direction: column;
+				justify-content: flex-end; /* Garante que a linha fique sempre na base */
+				min-height: 70px;
+			}
+			.signature-img {
+				max-height: 50px;
+				object-fit: contain;
+				margin: 0 auto -10px auto; /* Sobrepõe a imagem à linha suavemente */
+				position: relative;
+				z-index: 10;
+			}
+			.signature-line {
+				border-top: 1px solid #225378;
+				padding-top: 5px;
+				font-weight: 600;
+				font-size: 11px;
+				position: relative;
+				z-index: 1;
+			}
+			.footer {
+				margin-top: 15px;
+				text-align: right;
+				font-size: 10px;
+				font-style: italic;
+				color: #70808f;
+			}
+			/* 🟢 Força a criação de uma nova página no PDF */
+			.page-break {
+				page-break-before: always;
+			}
+			.checklist-status {
+				font-weight: bold;
+				text-align: center;
+			}
+			.status-ok {
+				color: #16a34a;
+			}
+			.status-nok {
+				color: #dc2626;
+			}
+		</style>
+	</head>
+	<body>
+
+		<div class="header">
+			<div class="header-title">
+				{{#if logo_url}}
+					<img src="{{logo_url}}" alt="DWL Diagnóstica" />
+				{{else}}
+					<h2>DWL DIAGNÓSTICA</h2>
+					<span>ASSISTÊNCIA TÉCNICA ESPECIALIZADA</span>
+				{{/if}}
+			</div>
+			<div class="header-info">
+				Tel: (41) 3014-3636<br />
+				E-mail: suporte@dwldiagnostica.com.br
+			</div>
+		</div>
+
+		<div class="title">
+			Relatório de Manutenção Nº:
+			{{os.number}}/{{year}}
+		</div>
+
+		<table>
+			<tr>
+				<td colspan="4"><strong>Cliente:</strong> {{customer.name}}</td>
+			</tr>
+			<tr>
+				<td colspan="2"><strong>Endereço:</strong>
+					{{customer.address}}</td>
+				<td><strong>Cidade:</strong> {{customer.city}}</td>
+				<td><strong>Estado:</strong> {{customer.state}}</td>
+			</tr>
+			<tr>
+				<td colspan="2"><strong>Telefone:</strong>
+					{{customer.phone}}</td>
+				<td colspan="2"><strong>Tipo de O.S:</strong> {{os.type}}</td>
+			</tr>
+		</table>
+
+		<div class="section-title">DADOS DO EQUIPAMENTO</div>
+		<table>
+			<tr>
+				<td><strong>Modelo:</strong> {{equipment.model_name}}</td>
+				<td><strong>Nº de Série:</strong>
+					{{equipment.serial_number}}</td>
+			</tr>
+		</table>
+
+		<div class="section-title">MOTIVO DA VISITA / PROBLEMA RELATADO</div>
+		<div class="text-box">
+			{{os.problem_description}}
+		</div>
+
+		<div class="section-title">DESCRIÇÃO DOS SERVIÇOS EXECUTADOS</div>
+		<div class="text-box">
+			{{os.solution_description}}
+		</div>
+
+		{{#if hasReopenEvents}}
+			<div
+				style="margin-top: 15px; border-top: 1px solid #ddd; padding-top: 10px;"
+			>
+				<h4 style="color: #444; margin-bottom: 5px;">Histórico de
+					Reaberturas</h4>
+				<ul style="font-size: 12px; color: #555; padding-left: 15px;">
+					{{#each reopenEvents}}
+						<li style="margin-bottom: 4px;">
+							<strong>{{this.date}} - {{this.user}}:</strong>
+							{{this.reason}}
+						</li>
+					{{/each}}
+				</ul>
+			</div>
+		{{/if}}
+
+		{{#if os.technical_notes}}
+			<div
+				style="margin-top: 10px; padding: 8px; background-color: #fffbeb; border: 1px solid #fde68a; border-radius: 4px;"
+			>
+				<h4
+					style="margin: 0 0 3px 0; color: #b45309; font-size: 10px; text-transform: uppercase;"
+				>
+					Observações Técnicas / Condições de Uso
+				</h4>
+				<p style="margin: 0; font-size: 11px; color: #78350f;">
+					{{os.technical_notes}}
+				</p>
+			</div>
+		{{/if}}
+
+		<div class="section-title">PEÇAS UTILIZADAS</div>
+		<table class="parts-table">
+			<thead>
+				<tr style="background-color: #F8FAFC;">
+					<th>Código / SKU</th>
+					<th>Descrição</th>
+					<th style="text-align: center;">Qtde</th>
+					<th style="text-align: right;">Preço Unit. (R$)</th>
+					<th style="text-align: right;">Total (R$)</th>
+				</tr>
+			</thead>
+			<tbody>
+				{{#each parts}}
+					<tr>
+						<td>{{this.sku}}</td>
+						<td>{{this.name}}</td>
+						<td style="text-align: center;">{{this.quantity}}</td>
+						<td style="text-align: right;">{{this.unit_price}}</td>
+						<td style="text-align: right;">{{this.total_price}}</td>
+					</tr>
+				{{/each}}
+				{{#unless parts.length}}
+					<tr>
+						<td
+							colspan="5"
+							style="text-align: center; font-style: italic; color: #888;"
+						>
+							Nenhuma peça utilizada nesta ordem de serviço.
+						</td>
+					</tr>
+				{{/unless}}
+			</tbody>
+		</table>
+
+		<div class="bottom-section">
+			<!-- Lado Esquerdo: Garantia -->
+			<div class="warranty-box">
+				{{#if os.isPreventiva}}
+					<strong style="color: #225378;">Validade do relatório:</strong><br
+					/>
+					12 meses a partir da data de emissão.<br /><br />
+				{{/if}}
+				<strong style="color: #225378;">Garantia dos serviços:</strong><br
+				/>
+				90 dias para serviços prestados e peças substituídas, a partir
+				da data de encerramento desta O.S.
+			</div>
+
+			<!-- Lado Direito: Financeiro -->
+			<table class="financial-summary">
+				<tr>
+					<th>Subtotal Peças:</th>
+					<td style="text-align: right;">R$ {{costs.parts_total}}</td>
+				</tr>
+				<tr>
+					<th>Mão de Obra:</th>
+					<td style="text-align: right;">R$ {{costs.labor}}</td>
+				</tr>
+				<tr>
+					<th>Deslocamento:</th>
+					<td style="text-align: right;">R$ {{costs.travel}}</td>
+				</tr>
+				<tr>
+					<th>Estadia:</th>
+					<td style="text-align: right;">R$
+						{{costs.accommodation}}</td>
+				</tr>
+				<tr>
+					<th><strong style="font-size: 12px; color: #3796af;">TOTAL
+							DA O.S:</strong></th>
+					<td style="text-align: right;"><strong
+							style="font-size: 12px; color: #3796af;"
+						>R$ {{costs.grand_total}}</strong></td>
+				</tr>
+			</table>
+		</div>
+
+		<div class="signatures">
+			<div class="signature-box">
+				{{#if client_signature}}
+					<img
+						src="{{client_signature}}"
+						class="signature-img"
+						alt="Assinatura Cliente"
+					/>
+				{{/if}}
+				<div class="signature-line">
+					Assinatura do Cliente<br />
+					<span style="font-size: 9px; color: #70808F;">
+						<!-- 🟢 Exibe o nome de quem assinou, ou o nome do cliente como fallback -->
+						{{#if os.signer_name}}
+							{{os.signer_name}}
+						{{else}}
+							{{customer.name}}
+						{{/if}}
+					</span>
+				</div>
+			</div>
+
+			<div class="signature-box">
+				<!-- 🟢 Aqui a assinatura do técnico é renderizada perfeitamente! -->
+				{{#if tech.signature}}
+					<img
+						src="{{tech.signature}}"
+						class="signature-img"
+						alt="Assinatura Técnico"
+					/>
+				{{/if}}
+				<div class="signature-line">
+					Técnico Responsável<br />
+					<span
+						style="font-size: 9px; color: #70808F;"
+					>{{tech.name}}</span>
+				</div>
+			</div>
+		</div>
+
+		<div class="footer">
+			Pinhais,
+			{{currentDate}}
+		</div>
+
+<!-- 🟢 SEÇÃO DO CHECKLIST (Renderizada apenas se houver checklist respondido) -->
+		{{#if hasChecklist}}
+		<div class="page-break">
+			
+			<!-- Recria o cabeçalho para a nova página não ficar órfã de contexto -->
+			<div class="header">
+				<div class="header-title">
+					{{#if logo_url}}
+						<img src="{{logo_url}}" alt="DWL Diagnóstica" />
+					{{else}}
+						<h2>DWL DIAGNÓSTICA</h2>
+						<span>ASSISTÊNCIA TÉCNICA ESPECIALIZADA</span>
+					{{/if}}
+				</div>
+				<div class="header-info">
+					Tel: (41) 3014-3636<br />
+					E-mail: suporte@dwldiagnostica.com.br
+				</div>
+			</div>
+
+			<div class="title">
+				Checklist de Manutenção Nº: {{os.number}}/{{year}}
+			</div>
+
+			<div class="section-title">RESULTADOS DA INSPEÇÃO</div>
+			<table>
+				<thead>
+					<tr style="background-color: #F8FAFC;">
+						<th style="width: 45%;">Item Verificado</th>
+						<th style="width: 10%;">Status</th>
+						<th style="width: 45%;">Observação</th>
+					</tr>
+				</thead>
+				<tbody>
+					{{#each checklist.answers}}
+					<tr>
+						<td>{{this.question}}</td>
+						<td class="checklist-status {{#if this.is_ok}}status-ok{{else}}status-nok{{/if}}">
+							{{#if this.is_ok}}OK{{else}}NÃO OK{{/if}}
+						</td>
+						<td>{{this.comment}}</td>
+					</tr>
+					{{/each}}
+				</tbody>
+			</table>
+
+			{{#if checklist.notes}}
+			<div class="section-title">OBSERVAÇÕES GERAIS DO CHECKLIST</div>
+			<div class="text-box">
+				{{checklist.notes}}
+			</div>
+			{{/if}}
+			
+			<div class="signatures">
+				<div class="signature-box">
+					{{#if tech.signature}}
+						<img
+							src="{{tech.signature}}"
+							class="signature-img"
+							alt="Assinatura Técnico"
+						/>
+					{{/if}}
+					<div class="signature-line">
+						Técnico Responsável<br />
+						<span
+							style="font-size: 9px; color: #70808F;"
+						>{{tech.name}}</span>
+					</div>
+				</div>
+			</div>
+
+			<div class="footer">
+				Pinhais,
+				{{currentDate}}
+			</div>
+
+		</div> 
+		{{/if}}
+
+	</body>
+</html>

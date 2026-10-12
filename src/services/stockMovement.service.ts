@@ -78,7 +78,10 @@ export const getAllMovements = async (tenantId: string, partId?: string) => {
             },
             ...(partId ? { partId } : {})
         },
-        include: { part: true },
+        include: {
+            part: { select: { id: true, name: true, sku: true } },
+            user: { select: { id: true, name: true } },
+        },
         orderBy: { created_at: 'desc' }
     });
 };
