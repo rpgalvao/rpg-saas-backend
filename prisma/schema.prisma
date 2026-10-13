@@ -56,6 +56,9 @@ model Tenant {
   id         String   @id @default(uuid())
   name       String
   cnpj       String?  @unique
+  phone      String?
+  email      String?
+  logo_url   String?
   active     Boolean  @default(true)
   created_at DateTime @default(now())
 
