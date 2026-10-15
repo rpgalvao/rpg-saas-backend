@@ -28,12 +28,14 @@ enum ServiceOrderType {
 }
 
 enum Role {
+  SUPER_ADMIN
   ADMIN
   TECHNICIAN
 }
 
 enum ServiceOrderStatus {
   ABERTA
+  ORCAMENTO
   FINALIZADA
   CANCELADA
 }
@@ -55,6 +57,7 @@ enum MovementType {
 model Tenant {
   id         String   @id @default(uuid())
   name       String
+  tradeName  String?
   cnpj       String?  @unique
   phone      String?
   email      String?
@@ -129,6 +132,7 @@ model Customer {
 model EquipmentModel {
   id         String   @id @default(uuid())
   name       String
+  brand      String?
   active     Boolean  @default(true)
   created_at DateTime @default(now())
   updated_at DateTime @updatedAt

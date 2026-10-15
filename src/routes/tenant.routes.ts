@@ -9,9 +9,10 @@ const route = Router();
 const upload = multer(uploadConfig);
 
 route.use(authMiddleware);
-route.use(adminMiddleware);
 
 route.get('/me', TenantController.getMe);
+
+route.use(adminMiddleware);
 route.put('/me', upload.single('logo'), TenantController.updateMe);
 
 export default route;

@@ -1,7 +1,7 @@
 import { AppError } from "../errors/AppError";
 import { prisma } from "../libs/prisma";
 
-export const createEquipmentModel = async (data: { name: string; }, tenantId: string) => {
+export const createEquipmentModel = async (data: { name: string; brand?: string; }, tenantId: string) => {
     const modelExists = await prisma.equipmentModel.findUnique({
         where: {
             name_tenantId: {
@@ -18,6 +18,7 @@ export const createEquipmentModel = async (data: { name: string; }, tenantId: st
     const newModel = await prisma.equipmentModel.create({
         data: {
             name: data.name,
+            brand: data.brand,
             tenantId
         }
     });
@@ -66,7 +67,7 @@ export const toggleEquipmentModelStatus = async (id: string, tenantId: string) =
     return updatedModel;
 };
 
-export const updateEquipmentModel = async (id: string, tenantId: string, data: { name: string; }) => {
+export const updateEquipmentModel = async (id: string, tenantId: string, data: { name: string; brand?: string; }) => {
     const modelExists = await prisma.equipmentModel.findFirst({
         where: { id, tenantId }
     });
@@ -94,7 +95,8 @@ export const updateEquipmentModel = async (id: string, tenantId: string, data: {
     const updatedModel = await prisma.equipmentModel.update({
         where: { id, tenantId },
         data: {
-            name: data.name
+            name: data.name,
+            brand: data.brand
         }
     });
 

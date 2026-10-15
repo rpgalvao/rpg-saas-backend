@@ -7,6 +7,7 @@ import { UpdateTenantInput } from "../validators/tenant.validator";
 const tenantSelect = {
     id: true,
     name: true,
+    tradeName: true,
     cnpj: true,
     phone: true,
     email: true,

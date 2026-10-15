@@ -12,6 +12,7 @@ import supplierRoute from './supplier.routes';
 import partRoute from './part.routes';
 import stockMovementRoute from './stockMovement.routes';
 import tenantRoute from './tenant.routes';
+import masterRoute from './master.routes';
 import { adminMiddleware } from "../middlewares/admin.middleware";
 import rateLimit from "express-rate-limit";
 import * as ServiceOrderController from "../controllers/serviceOrder.controller";
@@ -42,6 +43,7 @@ route.get('/serviceorder/:id/qr-pdf', ServiceOrderController.viewPdfFromQr); // 
 route.use(authMiddleware);
 
 // Rotas Protegidas
+route.use('/master', masterRoute);
 route.use('/tenant', tenantRoute);
 route.use('/user', userRoute);
 route.use('/dashboard', dashboardRoute);

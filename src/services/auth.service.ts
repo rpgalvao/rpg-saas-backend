@@ -25,6 +25,11 @@ export const loginUser = async (email: string, password: string) => {
         name: user.name
     });
 
+    const tenant = await prisma.tenant.findUnique({
+        where: { id: user.tenantId },
+        select: { id: true, name: true, tradeName: true, logo_url: true },
+    });
+
     return {
         user: {
             id: user.id,
@@ -35,6 +40,16 @@ export const loginUser = async (email: string, password: string) => {
             tenantId: user.tenantId, // O frontend pode precisar saber qual é a empresa
             signature_url: user.signature_url,
             avatar_url: user.avatar_url ? setFullURL(`/uploads/avatars/${user.avatar_url}`) : null,
+            tenant: tenant
+                ? {
+                    id: tenant.id,
+                    name: tenant.name,
+                    tradeName: tenant.tradeName,
+                    logo_url: tenant.logo_url
+                        ? setFullURL(`/uploads/logos/${tenant.logo_url}`)
+                        : null,
+                }
+                : null,
             created_at: user.created_at
         }, token
     };
