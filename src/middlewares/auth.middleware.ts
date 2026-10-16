@@ -10,17 +10,32 @@ export const authMiddleware = async (req: Request, res: Response, next: NextFunc
     if (!token) throw new AppError('Não autorizado', 401);
     const decoded = await decodeToken(token);
     if (!decoded) throw new AppError('Não autorizado', 401);
-    req.user = decoded;
 
-    if (decoded.role !== 'SUPER_ADMIN') {
-        const tenant = await prisma.tenant.findUnique({
-            where: { id: decoded.tenantId },
-            select: { active: true },
+    const user = await prisma.user.findUnique({
+        where: { id: decoded.id },
+        select: {
+            id: true,
+            name: true,
+            role: true,
+            tenantId: true,
+            tenant: { select: { active: true } },
+        },
+    });
+
+    if (!user) throw new AppError('Não autorizado', 401);
+
+    req.user = {
+        id: user.id,
+        name: user.name,
+        role: user.role,
+        tenantId: user.tenantId,
+    };
+
+    if (!user.tenant.active && user.role !== 'SUPER_ADMIN') {
+        return res.status(403).json({
+            error: 'TENANT_BLOCKED',
+            message: 'Sua assinatura está suspensa.',
         });
-
-        if (!tenant || !tenant.active) {
-            throw new AppError('Assinatura suspensa. Entre em contato com a RPG Sistemas.', 403);
-        }
     }
 
     next();

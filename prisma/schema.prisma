@@ -55,15 +55,18 @@ enum MovementType {
 // 🏢 O CORAÇÃO DO SAAS: TENANT (Empresa)
 // ==========================================
 model Tenant {
-  id         String   @id @default(uuid())
-  name       String
-  tradeName  String?
-  cnpj       String?  @unique
-  phone      String?
-  email      String?
-  logo_url   String?
-  active     Boolean  @default(true)
-  created_at DateTime @default(now())
+  id                    String   @id @default(uuid())
+  name                  String
+  tradeName             String?
+  cnpj                  String?  @unique
+  address               String?
+  stateRegistration     String?
+  municipalRegistration String?
+  phone                 String?
+  email                 String?
+  logo_url              String?
+  active                Boolean  @default(true)
+  created_at            DateTime @default(now())
 
   // Relacionamentos: O Tenant é dono de todas estas entidades
   users               User[]
@@ -74,8 +77,22 @@ model Tenant {
   parts               Part[]
   suppliers           Supplier[]
   checklist_templates ChecklistTemplate[]
+  payments            TenantPayment[]
 
   @@map("tenants")
+}
+
+model TenantPayment {
+  id        String    @id @default(uuid())
+  amount    Float
+  dueDate   DateTime
+  paidDate  DateTime?
+  status    String    @default("PENDING")
+  tenantId  String
+  tenant    Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+  @@map("tenant_payments")
 }
 
 model User {

@@ -27,7 +27,7 @@ export const loginUser = async (email: string, password: string) => {
 
     const tenant = await prisma.tenant.findUnique({
         where: { id: user.tenantId },
-        select: { id: true, name: true, tradeName: true, logo_url: true },
+        select: { id: true, name: true, tradeName: true, logo_url: true, active: true },
     });
 
     return {
@@ -45,6 +45,7 @@ export const loginUser = async (email: string, password: string) => {
                     id: tenant.id,
                     name: tenant.name,
                     tradeName: tenant.tradeName,
+                    active: tenant.active,
                     logo_url: tenant.logo_url
                         ? setFullURL(`/uploads/logos/${tenant.logo_url}`)
                         : null,
