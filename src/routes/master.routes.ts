@@ -13,6 +13,7 @@ route.post('/tenants', MasterController.createTenant);
 route.get('/tenants/:id', MasterController.getTenant);
 route.put('/tenants/:id', MasterController.updateTenant);
 route.patch('/tenants/:id/toggle', MasterController.toggleTenant);
+route.get('/tenants/:id/users', MasterController.listTenantUsers);
 
 route.get('/tenants/:id/payments', MasterController.listTenantPayments);
 route.post('/tenants/:id/payments', MasterController.createTenantPayment);

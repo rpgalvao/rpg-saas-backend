@@ -19,6 +19,16 @@ const tenantSelect = {
     phone: true,
     email: true,
     active: true,
+    maxConcurrentUsers: true,
+    created_at: true,
+} as const;
+
+const userSelect = {
+    id: true,
+    name: true,
+    email: true,
+    role: true,
+    active: true,
     created_at: true,
 } as const;
 
@@ -129,14 +139,7 @@ export const getTenantById = async (id: string) => {
         select: {
             ...tenantSelect,
             users: {
-                select: {
-                    id: true,
-                    name: true,
-                    email: true,
-                    role: true,
-                    active: true,
-                    created_at: true,
-                },
+                select: userSelect,
                 orderBy: { created_at: 'asc' },
             },
             payments: {
@@ -185,6 +188,9 @@ export const updateTenant = async (id: string, input: UpdateMasterTenantInput) =
                     municipalRegistration: input.municipalRegistration,
                 }),
                 ...(input.active !== undefined && { active: input.active }),
+                ...(input.maxConcurrentUsers !== undefined && {
+                    maxConcurrentUsers: input.maxConcurrentUsers,
+                }),
             },
             select: tenantSelect,
         });
@@ -195,6 +201,16 @@ export const updateTenant = async (id: string, input: UpdateMasterTenantInput) =
         }
         throw error;
     }
+};
+
+export const listTenantUsers = async (tenantId: string) => {
+    await assertTenantExists(tenantId);
+
+    return prisma.user.findMany({
+        where: { tenantId },
+        select: userSelect,
+        orderBy: { created_at: 'asc' },
+    });
 };
 
 export const toggleTenantStatus = async (id: string) => {

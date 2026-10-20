@@ -45,6 +45,15 @@ export const updateTenant: RequestHandler = async (req, res) => {
     res.json({ success: true, data: tenant });
 };
 
+export const listTenantUsers: RequestHandler = async (req, res) => {
+    if (!req.user) throw new AppError('Usuário não autenticado', 401);
+
+    const { id } = tenantIdParamSchema.parse(req.params);
+    const users = await MasterService.listTenantUsers(id);
+
+    res.json({ success: true, data: users });
+};
+
 export const toggleTenant: RequestHandler = async (req, res) => {
     if (!req.user) throw new AppError('Usuário não autenticado', 401);
 

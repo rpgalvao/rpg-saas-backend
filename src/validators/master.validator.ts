@@ -45,6 +45,7 @@ export const updateMasterTenantSchema = z.object({
     stateRegistration: optionalText,
     municipalRegistration: optionalText,
     active: z.coerce.boolean().optional(),
+    maxConcurrentUsers: z.coerce.number().int().positive('O limite deve ser um número inteiro positivo').optional(),
 });
 
 export const tenantIdParamSchema = z.object({

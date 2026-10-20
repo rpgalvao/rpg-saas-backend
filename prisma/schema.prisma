@@ -66,6 +66,7 @@ model Tenant {
   email                 String?
   logo_url              String?
   active                Boolean  @default(true)
+  maxConcurrentUsers    Int      @default(3)
   created_at            DateTime @default(now())
 
   // Relacionamentos: O Tenant é dono de todas estas entidades
