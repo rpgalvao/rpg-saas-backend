@@ -79,18 +79,21 @@ model Tenant {
   suppliers           Supplier[]
   checklist_templates ChecklistTemplate[]
   payments            TenantPayment[]
+  dealStages          DealStage[]
+  deals               Deal[]
+  quotes              Quote[]
 
   @@map("tenants")
 }
 
 model TenantPayment {
-  id        String    @id @default(uuid())
-  amount    Float
-  dueDate   DateTime
-  paidDate  DateTime?
-  status    String    @default("PENDING")
-  tenantId  String
-  tenant    Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  id       String    @id @default(uuid())
+  amount   Float
+  dueDate  DateTime
+  paidDate DateTime?
+  status   String    @default("PENDING")
+  tenantId String
+  tenant   Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
   @@index([tenantId])
   @@map("tenant_payments")
@@ -127,6 +130,9 @@ model Customer {
   name         String
   email        String?
   phone        String?
+  mobilePhone  String?
+  customerType String   @default("CLIENT")
+  leadSource   String?
   zipcode      String?
   city         String
   state        String
@@ -143,8 +149,91 @@ model Customer {
 
   equipments    Equipment[]
   serviceOrders ServiceOrder[]
+  deals         Deal[]
+  quotes        Quote[]
 
   @@map("customers")
+}
+
+// ==========================================
+// 📊 CRM: Pipeline de Negócios (Kanban)
+// ==========================================
+model DealStage {
+  id       String @id @default(uuid())
+  name     String
+  order    Int
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  deals Deal[]
+
+  @@unique([tenantId, order])
+  @@index([tenantId])
+  @@map("deal_stages")
+}
+
+model Deal {
+  id             String   @id @default(uuid())
+  title          String
+  description    String?
+  estimatedValue Float    @default(0)
+  status         String   @default("OPEN")
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  tenantId   String
+  tenant     Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  customerId String?
+  customer   Customer? @relation(fields: [customerId], references: [id])
+  stageId    String
+  stage      DealStage @relation(fields: [stageId], references: [id], onDelete: Cascade)
+
+  quotes Quote[]
+
+  @@index([tenantId])
+  @@index([customerId])
+  @@index([stageId])
+  @@map("deals")
+}
+
+// ==========================================
+// 📄 CRM: Orçamentos (Quotes)
+// ==========================================
+model Quote {
+  id          String    @id @default(uuid())
+  status      String    @default("DRAFT")
+  validUntil  DateTime?
+  totalAmount Float     @default(0)
+  notes       String?
+
+  tenantId   String
+  tenant     Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  dealId     String
+  deal       Deal     @relation(fields: [dealId], references: [id], onDelete: Cascade)
+  customerId String
+  customer   Customer @relation(fields: [customerId], references: [id])
+
+  items QuoteItem[]
+
+  @@index([tenantId])
+  @@index([dealId])
+  @@index([customerId])
+  @@map("quotes")
+}
+
+model QuoteItem {
+  id          String @id @default(uuid())
+  type        String
+  description String
+  quantity    Float
+  unitPrice   Float
+  totalPrice  Float
+
+  quoteId String
+  quote   Quote  @relation(fields: [quoteId], references: [id], onDelete: Cascade)
+
+  @@index([quoteId])
+  @@map("quote_items")
 }
 
 model EquipmentModel {
