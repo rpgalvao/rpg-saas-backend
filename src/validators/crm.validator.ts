@@ -20,4 +20,8 @@ export const updateDealStatusSchema = z.object({
     status: z.enum(['WON', 'LOST'], {
         message: 'Status deve ser WON ou LOST',
     }),
+    lostReason: z.string().trim().min(1, 'Informe o motivo da perda').optional(),
+}).refine((data) => data.status !== 'LOST' || Boolean(data.lostReason), {
+    message: 'Informe o motivo da perda',
+    path: ['lostReason'],
 });

@@ -140,7 +140,8 @@ export const moveDeal = async (tenantId: string, dealId: string, newStageId: str
 export const updateDealStatus = async (
     tenantId: string,
     dealId: string,
-    status: 'WON' | 'LOST'
+    status: 'WON' | 'LOST',
+    lostReason?: string,
 ) => {
     const deal = await prisma.deal.findFirst({
         where: { id: dealId, tenantId },
@@ -152,7 +153,10 @@ export const updateDealStatus = async (
 
     return prisma.deal.update({
         where: { id: dealId },
-        data: { status },
+        data: {
+            status,
+            lostReason: status === 'LOST' ? lostReason ?? null : null,
+        },
         include: {
             customer: {
                 select: {

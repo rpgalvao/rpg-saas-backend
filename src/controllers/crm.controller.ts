@@ -40,7 +40,7 @@ export const updateDealStatus: RequestHandler = async (req, res) => {
     const { tenantId } = req.user;
 
     const { id } = dealIdSchema.parse(req.params);
-    const { status } = updateDealStatusSchema.parse(req.body);
-    const deal = await CrmService.updateDealStatus(tenantId, id, status);
+    const { status, lostReason } = updateDealStatusSchema.parse(req.body);
+    const deal = await CrmService.updateDealStatus(tenantId, id, status, lostReason);
     res.json({ success: true, data: deal });
 };

@@ -131,6 +131,7 @@ model Customer {
   email        String?
   phone        String?
   mobilePhone  String?
+  document     String?
   customerType String   @default("CLIENT")
   leadSource   String?
   zipcode      String?
@@ -178,6 +179,7 @@ model Deal {
   description    String?
   estimatedValue Float    @default(0)
   status         String   @default("OPEN")
+  lostReason     String?
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 
