@@ -7,6 +7,100 @@ type QuoteItemInput = {
     description: string;
     quantity: number;
     unitPrice: number;
+    partId?: string | null;
+};
+
+type ReservedItem = {
+    partId: string | null;
+    quantity: number;
+};
+
+const INSUFFICIENT_STOCK_MESSAGE = 'Estoque disponível insuficiente para reserva';
+
+const linkedPartId = (item: { type: string; partId?: string | null }) => {
+    if (item.partId && item.type !== 'PRODUCT') {
+        throw new AppError('Peças do estoque só podem ser vinculadas a itens do tipo PRODUCT', 400);
+    }
+
+    if (item.type !== 'PRODUCT') return null;
+    return item.partId ?? null;
+};
+
+const reservePartQuantity = async (
+    tx: Prisma.TransactionClient,
+    tenantId: string,
+    partId: string,
+    quantity: number,
+) => {
+    if (!Number.isInteger(quantity)) {
+        throw new AppError('A quantidade reservada da peça deve ser um número inteiro', 400);
+    }
+
+    const part = await tx.part.findFirst({
+        where: { id: partId, tenantId },
+    });
+
+    if (!part) {
+        throw new AppError('Peça não encontrada', 404);
+    }
+
+    if (part.current_stock - part.reservedQuantity < quantity) {
+        throw new AppError(INSUFFICIENT_STOCK_MESSAGE, 400);
+    }
+
+    const updated = await tx.part.updateMany({
+        where: {
+            id: part.id,
+            tenantId,
+            current_stock: part.current_stock,
+            reservedQuantity: { lte: part.current_stock - quantity },
+        },
+        data: {
+            reservedQuantity: { increment: quantity },
+        },
+    });
+
+    if (updated.count !== 1) {
+        throw new AppError(INSUFFICIENT_STOCK_MESSAGE, 400);
+    }
+};
+
+const releasePartQuantity = async (
+    tx: Prisma.TransactionClient,
+    partId: string,
+    quantity: number,
+) => {
+    if (!Number.isInteger(quantity)) {
+        throw new AppError('A quantidade reservada da peça deve ser um número inteiro', 400);
+    }
+
+    await tx.part.update({
+        where: { id: partId },
+        data: {
+            reservedQuantity: { decrement: quantity },
+        },
+    });
+};
+
+export const releaseReservedParts = async (
+    tx: Prisma.TransactionClient,
+    items: ReservedItem[],
+) => {
+    for (const item of items) {
+        if (!item.partId) continue;
+        await releasePartQuantity(tx, item.partId, item.quantity);
+    }
+};
+
+const reserveParts = async (
+    tx: Prisma.TransactionClient,
+    tenantId: string,
+    items: ReservedItem[],
+) => {
+    for (const item of items) {
+        if (!item.partId) continue;
+        await reservePartQuantity(tx, tenantId, item.partId, item.quantity);
+    }
 };
 
 const QUOTE_STATUSES = ['DRAFT', 'SENT', 'APPROVED', 'REJECTED'] as const;
@@ -93,6 +187,7 @@ export const createQuote = async (tenantId: string, data: CreateQuoteData) => {
     }
 
     const items = data.items ?? [];
+    const status = data.status ?? 'DRAFT';
     const itemsWithTotals = items.map((item) => {
         const totalPrice = item.quantity * item.unitPrice;
         return {
@@ -101,12 +196,17 @@ export const createQuote = async (tenantId: string, data: CreateQuoteData) => {
             quantity: item.quantity,
             unitPrice: item.unitPrice,
             totalPrice,
+            partId: linkedPartId(item),
         };
     });
 
     const totalAmount = itemsWithTotals.reduce((sum, item) => sum + item.totalPrice, 0);
 
     return prisma.$transaction(async (tx) => {
+        if (status !== 'REJECTED') {
+            await reserveParts(tx, tenantId, itemsWithTotals);
+        }
+
         const quote = await tx.quote.create({
             data: {
                 tenantId,
@@ -114,7 +214,7 @@ export const createQuote = async (tenantId: string, data: CreateQuoteData) => {
                 customerId: data.customerId,
                 validUntil: data.validUntil ?? null,
                 notes: data.notes,
-                status: data.status ?? 'DRAFT',
+                status,
                 totalAmount,
                 items: {
                     create: itemsWithTotals,
@@ -197,28 +297,43 @@ export const updateQuoteStatus = async (
         throw new AppError('Orçamento não encontrado', 404);
     }
 
-    return prisma.quote.update({
-        where: { id: quoteId },
-        data: { status },
-        include: {
-            items: true,
-            customer: {
-                select: {
-                    id: true,
-                    name: true,
-                    email: true,
-                    phone: true,
-                    mobilePhone: true,
+    return prisma.$transaction(async (tx) => {
+        const items = await tx.quoteItem.findMany({
+            where: { quoteId },
+            select: { partId: true, quantity: true },
+        });
+
+        if (quote.status !== 'REJECTED' && status === 'REJECTED') {
+            await releaseReservedParts(tx, items);
+        }
+
+        if (quote.status === 'REJECTED' && status !== 'REJECTED') {
+            await reserveParts(tx, tenantId, items);
+        }
+
+        return tx.quote.update({
+            where: { id: quoteId },
+            data: { status },
+            include: {
+                items: true,
+                customer: {
+                    select: {
+                        id: true,
+                        name: true,
+                        email: true,
+                        phone: true,
+                        mobilePhone: true,
+                    },
+                },
+                deal: {
+                    select: {
+                        id: true,
+                        title: true,
+                        status: true,
+                    },
                 },
             },
-            deal: {
-                select: {
-                    id: true,
-                    title: true,
-                    status: true,
-                },
-            },
-        },
+        });
     });
 };
 
@@ -238,8 +353,13 @@ export const addQuoteItem = async (
 
     const totalPrice = item.quantity * item.unitPrice;
     const newTotalAmount = quote.totalAmount + totalPrice;
+    const partId = linkedPartId(item);
 
     return prisma.$transaction(async (tx) => {
+        if (partId && quote.status !== 'REJECTED') {
+            await reservePartQuantity(tx, tenantId, partId, item.quantity);
+        }
+
         await tx.quoteItem.create({
             data: {
                 quoteId,
@@ -248,6 +368,7 @@ export const addQuoteItem = async (
                 quantity: item.quantity,
                 unitPrice: item.unitPrice,
                 totalPrice,
+                partId,
             },
         });
 
@@ -279,8 +400,17 @@ export const updateQuoteItem = async (
     const quantity = data.quantity ?? item.quantity;
     const unitPrice = data.unitPrice ?? item.unitPrice;
     const totalPrice = quantity * unitPrice;
+    const diff = quantity - item.quantity;
 
     return prisma.$transaction(async (tx) => {
+        if (item.partId && item.quote.status !== 'REJECTED' && diff !== 0) {
+            if (diff > 0) {
+                await reservePartQuantity(tx, tenantId, item.partId, diff);
+            } else {
+                await releasePartQuantity(tx, item.partId, Math.abs(diff));
+            }
+        }
+
         await tx.quoteItem.update({
             where: { id: itemId },
             data: {
@@ -322,6 +452,10 @@ export const deleteQuoteItem = async (
     }
 
     return prisma.$transaction(async (tx) => {
+        if (item.partId && item.quote.status !== 'REJECTED') {
+            await releasePartQuantity(tx, item.partId, item.quantity);
+        }
+
         await tx.quoteItem.delete({
             where: { id: itemId },
         });
@@ -345,6 +479,14 @@ export const deleteQuote = async (tenantId: string, quoteId: string) => {
     }
 
     await prisma.$transaction(async (tx) => {
+        if (quote.status !== 'REJECTED') {
+            const items = await tx.quoteItem.findMany({
+                where: { quoteId },
+                select: { partId: true, quantity: true },
+            });
+            await releaseReservedParts(tx, items);
+        }
+
         await tx.quoteItem.deleteMany({
             where: { quoteId },
         });

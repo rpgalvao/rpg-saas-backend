@@ -234,7 +234,11 @@ model QuoteItem {
   quoteId String
   quote   Quote  @relation(fields: [quoteId], references: [id], onDelete: Cascade)
 
+  partId String?
+  part   Part?   @relation(fields: [partId], references: [id])
+
   @@index([quoteId])
+  @@index([partId])
   @@map("quote_items")
 }
 
@@ -416,13 +420,14 @@ model Supplier {
 }
 
 model Part {
-  id            String  @id @default(uuid())
-  name          String
-  sku           String?
-  cost_price    Decimal @db.Decimal(10, 2)
-  sale_price    Decimal @db.Decimal(10, 2)
-  current_stock Int     @default(0)
-  min_stock     Int     @default(0)
+  id               String  @id @default(uuid())
+  name             String
+  sku              String?
+  cost_price       Decimal @db.Decimal(10, 2)
+  sale_price       Decimal @db.Decimal(10, 2)
+  current_stock    Int     @default(0)
+  reservedQuantity Int     @default(0)
+  min_stock        Int     @default(0)
 
   // 🟢 LIGAÇÃO MULTI-TENANT
   tenantId String
@@ -437,6 +442,7 @@ model Part {
 
   movements   StockMovement[]
   replaced_in PartReplaced[]
+  quoteItems  QuoteItem[]
 
   @@map("parts")
 }

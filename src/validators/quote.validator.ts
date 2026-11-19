@@ -7,6 +7,7 @@ const quoteItemSchema = z.object({
     description: z.string().min(1, 'A descrição do item é obrigatória'),
     quantity: z.number().positive('A quantidade deve ser maior que zero'),
     unitPrice: z.number().nonnegative('O preço unitário não pode ser negativo'),
+    partId: z.uuid('ID da peça inválido').optional().nullable(),
 });
 
 export const createQuoteSchema = z.object({

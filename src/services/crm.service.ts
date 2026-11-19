@@ -1,5 +1,6 @@
 import { AppError } from "../errors/AppError";
 import { prisma } from "../libs/prisma";
+import { releaseReservedParts } from "./quote.service";
 
 const DEFAULT_STAGES = [
     { name: 'Contato Inicial', order: 1 },
@@ -151,23 +152,51 @@ export const updateDealStatus = async (
         throw new AppError('Oportunidade não encontrada', 404);
     }
 
-    return prisma.deal.update({
-        where: { id: dealId },
-        data: {
-            status,
-            lostReason: status === 'LOST' ? lostReason ?? null : null,
-        },
-        include: {
-            customer: {
-                select: {
-                    id: true,
-                    name: true,
-                    mobilePhone: true,
-                    customerType: true,
-                    leadSource: true,
+    return prisma.$transaction(async (tx) => {
+        if (status === 'LOST') {
+            const quotes = await tx.quote.findMany({
+                where: {
+                    tenantId,
+                    dealId,
+                    status: { not: 'REJECTED' },
                 },
+                include: {
+                    items: {
+                        select: { partId: true, quantity: true },
+                    },
+                },
+            });
+
+            for (const quote of quotes) {
+                await releaseReservedParts(tx, quote.items);
+            }
+
+            if (quotes.length > 0) {
+                await tx.quote.updateMany({
+                    where: { id: { in: quotes.map((quote) => quote.id) } },
+                    data: { status: 'REJECTED' },
+                });
+            }
+        }
+
+        return tx.deal.update({
+            where: { id: dealId },
+            data: {
+                status,
+                lostReason: status === 'LOST' ? lostReason ?? null : null,
             },
-            stage: true,
-        },
+            include: {
+                customer: {
+                    select: {
+                        id: true,
+                        name: true,
+                        mobilePhone: true,
+                        customerType: true,
+                        leadSource: true,
+                    },
+                },
+                stage: true,
+            },
+        });
     });
 };
